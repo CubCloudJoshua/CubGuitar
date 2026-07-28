@@ -46,6 +46,9 @@ export function App() {
   const [importNotice, setImportNotice] = useState<ImportReport | null>(null);
   /** Opened via a share link: read-only, no library. */
   const [sharedView] = useState(() => sharedIdFromLocation() !== null);
+  /** Payload of the currently open shared score, so it can be saved locally. */
+  const sharedPayloadRef = useRef<{ title: string; artist: string; format: "gp" | "altex"; tex: string | null; bytesB64: string | null } | null>(null);
+  const [sharedSaved, setSharedSaved] = useState(false);
   const auth = useAuth();
   const [accountOpen, setAccountOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
@@ -79,6 +82,7 @@ export function App() {
       void (async () => {
         try {
           const payload = await fetchShared(sharedId);
+          sharedPayloadRef.current = payload;
           if (payload.tex !== null) loadTex(payload.tex);
           else if (payload.bytesB64) loadBytes(base64ToBytes(payload.bytesB64));
         } catch (err) {
@@ -192,6 +196,29 @@ export function App() {
     }, 1000);
     return () => clearTimeout(timer);
   }, [mode, editorScore, editorTex, refresh]);
+
+  /** A share recipient keeps a copy: store it locally, then open the full app. */
+  const saveSharedToLibrary = useCallback(async () => {
+    const payload = sharedPayloadRef.current;
+    if (!payload || !c.score) return;
+    await putEntry({
+      id: newId(),
+      title: c.score.title,
+      artist: c.score.artist,
+      format: payload.format,
+      tex: payload.tex,
+      bytes: payload.bytesB64 ? base64ToBytes(payload.bytesB64) : null,
+      core: null,
+      report: null,
+      authored: false,
+      fileName: null,
+      addedAt: Date.now(),
+      openedAt: Date.now(),
+      tracks: c.tracks.length,
+      bars: c.score.barCount,
+    });
+    setSharedSaved(true);
+  }, [c.score, c.tracks]);
 
   const shareCurrent = useCallback(async () => {
     const entry = entries.find((e) => e.id === currentId);
@@ -324,6 +351,20 @@ export function App() {
           >
             SHARED SCORE
           </span>
+        )}
+        {sharedView && !shareError && (
+          sharedSaved ? (
+            <a
+              href={location.pathname}
+              style={{ ...headerButton, textDecoration: "none", display: "inline-block" }}
+            >
+              SAVED — OPEN MY LIBRARY
+            </a>
+          ) : (
+            <button onClick={() => void saveSharedToLibrary()} style={headerButton} disabled={!c.score}>
+              SAVE TO MY LIBRARY
+            </button>
+          )
         )}
         <span style={{ flex: 1 }} />
         {!sharedView && narrow && (

@@ -148,6 +148,8 @@ Every edit is an operation in a log. That single choice gives us undo, autosave,
 
 ## 5. Roadmap
 
+**Status, July 2026.** Phase 0 complete except real-file corpus testing (the harness exists and enforces pitch-exact import fidelity; it needs real .gp files). Phase 1 functionally complete: player, local-first library, accounts, cloud library sync, revocable share links with save-to-library for recipients, exports (.gp/alphaTex/MIDI/print), responsive to phone width. Landed early from Phase 2: the op-log editor on the semantic model, .gp export, and editable imports. Billing rails, email verification, and the Phase 1 exit polish remain.
+
 ### Phase 0: Foundations (weeks 1 to 4)
 - Monorepo, CI, deploy pipeline to CubCloud infra.
 - Score data model and op-log design finalized and documented.
