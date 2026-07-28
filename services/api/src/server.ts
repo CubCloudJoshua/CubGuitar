@@ -34,7 +34,26 @@ interface CreateBody {
   bytesB64?: unknown;
 }
 
+/** In-memory per-IP limit on writes. Enough for dev and single-node deploys. */
+const RATE_LIMIT = 60;
+const RATE_WINDOW_MS = 60 * 60 * 1000;
+const writeCounts = new Map<string, { count: number; resetAt: number }>();
+
+function overWriteLimit(ip: string): boolean {
+  const now = Date.now();
+  const entry = writeCounts.get(ip);
+  if (!entry || now >= entry.resetAt) {
+    writeCounts.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > RATE_LIMIT;
+}
+
 app.post("/api/scores", async (request, reply) => {
+  if (overWriteLimit(request.ip)) {
+    return reply.status(429).send({ error: "rate limit exceeded, try again later" });
+  }
   const body = (request.body ?? {}) as CreateBody;
 
   const format = body.format === "gp" || body.format === "altex" ? body.format : null;

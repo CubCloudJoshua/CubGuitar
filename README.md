@@ -45,8 +45,12 @@ pnpm install
 pnpm api        # start the share-link API on :8787
 pnpm dev        # start the web app (proxies /api to :8787)
 pnpm build      # typecheck and build everything
+pnpm test       # unit tests (packages/core)
 pnpm corpus     # load and render every score in fixtures/ and corpus/
 ```
+
+CI runs build, unit tests, and the corpus suite (including import round-trip
+pitch fidelity) on every push.
 
 `pnpm corpus` runs the built app in headless Chromium, so run `pnpm build` first. It
 reports track, bar, and note counts per score, prints alphaTab diagnostics for

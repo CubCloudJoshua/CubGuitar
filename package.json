@@ -8,12 +8,14 @@
     "typecheck": "pnpm -r typecheck",
     "dev": "pnpm --filter @cubscore/web dev",
     "api": "pnpm --filter @cubscore/api dev",
+    "test": "pnpm -r test",
     "corpus": "node tools/corpus-check.mjs"
   },
   "engines": {
     "node": ">=22"
   },
   "devDependencies": {
+    "playwright": "^1.62.0",
     "playwright-core": "^1.49.0"
   },
   "packageManager": "pnpm@10.33.0"

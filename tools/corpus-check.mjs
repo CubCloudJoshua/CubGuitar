@@ -11,6 +11,7 @@
  * Exits non-zero if any score fails.
  */
 import { spawn } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -20,7 +21,11 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const WEB = path.join(ROOT, "apps", "web");
 const PORT = 4183;
 const BASE = `http://localhost:${PORT}`;
-const CHROMIUM = process.env.CHROMIUM_PATH ?? "/opt/pw-browsers/chromium";
+// Browser resolution, in order: explicit env var, this sandbox's preinstalled
+// Chromium, then playwright's own cache (CI installs it there).
+const SANDBOX_CHROMIUM = "/opt/pw-browsers/chromium";
+const CHROMIUM =
+  process.env.CHROMIUM_PATH ?? (existsSync(SANDBOX_CHROMIUM) ? SANDBOX_CHROMIUM : undefined);
 const GP_EXTENSIONS = new Set([".gp", ".gp3", ".gp4", ".gp5", ".gpx"]);
 
 async function listFiles(dir, filter) {
@@ -69,7 +74,7 @@ async function main() {
 
   try {
     await waitForServer(BASE);
-    browser = await chromium.launch({ executablePath: CHROMIUM });
+    browser = await chromium.launch(CHROMIUM ? { executablePath: CHROMIUM } : {});
     const page = await browser.newPage();
     // alphaTab reports parser/semantic diagnostics to the console rather than
     // through the error event, and they are what actually tells you why a

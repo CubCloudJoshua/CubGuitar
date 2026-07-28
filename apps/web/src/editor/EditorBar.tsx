@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { theme } from "../theme";
 import { toggleStyle } from "../components/Toolbar";
 import type { Articulation } from "@cubscore/core";
@@ -75,6 +75,70 @@ function useEditorKeys(e: EditorController, enabled: boolean) {
   }, [e, enabled]);
 }
 
+/** Commits on blur or Enter, so typing does not flood the op log. */
+function MetaField({
+  label,
+  value,
+  onCommit,
+}: {
+  label: string;
+  value: string;
+  onCommit: (next: string) => void;
+}) {
+  const [draft, setDraft] = useState(value);
+  // Enter commits and then blurs, and the blur fires before React re-renders
+  // the new value prop. Comparing against a ref instead of the prop keeps
+  // that sequence from committing the same edit twice (two ops, two undos).
+  const committed = useRef(value);
+
+  // Re-sync when a different score loads underneath us.
+  useEffect(() => {
+    setDraft(value);
+    committed.current = value;
+  }, [value]);
+
+  const commit = () => {
+    if (draft === committed.current) return;
+    committed.current = draft;
+    onCommit(draft);
+  };
+
+  return (
+    <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
+      <span style={labelStyle}>{label}</span>
+      <input
+        value={draft}
+        onChange={(ev) => setDraft(ev.target.value)}
+        onBlur={commit}
+        onKeyDown={(ev) => {
+          if (ev.key === "Enter") {
+            ev.preventDefault();
+            commit();
+            (ev.target as HTMLInputElement).blur();
+          }
+        }}
+        aria-label={`Score ${label.toLowerCase()}`}
+        style={{
+          fontFamily: theme.mono,
+          fontSize: 12,
+          padding: "5px 8px",
+          width: label === "TITLE" ? 160 : 120,
+          background: theme.bg,
+          border: `1px solid ${theme.border}`,
+          color: theme.text,
+        }}
+      />
+    </label>
+  );
+}
+
+const labelStyle = {
+  fontFamily: theme.mono,
+  fontSize: 11,
+  color: theme.textDim,
+  letterSpacing: 0.5,
+} as const;
+
 export function EditorBar({ e, enabled }: { e: EditorController; enabled: boolean }) {
   useEditorKeys(e, enabled);
 
@@ -100,6 +164,10 @@ export function EditorBar({ e, enabled }: { e: EditorController; enabled: boolea
         bar {e.cursor.bar + 1} · beat {e.cursor.beat + 1} · string {e.cursor.string}
         {note ? ` · fret ${note.fret}` : " · empty"}
       </span>
+
+      <Divider />
+      <MetaField label="TITLE" value={e.score.title} onCommit={e.setTitle} />
+      <MetaField label="ARTIST" value={e.score.artist} onCommit={e.setArtist} />
 
       <Divider />
       <span style={label}>NOTE</span>

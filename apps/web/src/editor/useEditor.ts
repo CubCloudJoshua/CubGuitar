@@ -180,6 +180,11 @@ export function useEditor() {
     [commit],
   );
 
+  const setArtist = useCallback(
+    (artist: string) => commit([op({ type: "score.setArtist", artist })], "Artist"),
+    [commit],
+  );
+
   const moveBeat = useCallback(
     (delta: number) => {
       digitRef.current = null;
@@ -261,6 +266,7 @@ export function useEditor() {
     removeBeat,
     addBar,
     setTitle,
+    setArtist,
     moveBeat,
     moveString,
     undo,

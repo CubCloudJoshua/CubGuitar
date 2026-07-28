@@ -52,6 +52,21 @@ export function App() {
     setEntries(await listEntries());
   }, []);
 
+  // Space toggles playback everywhere except form fields and focused buttons,
+  // in the player, the editor, and shared views alike.
+  const { playPause } = c;
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.code !== "Space" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
+      const target = ev.target as HTMLElement | null;
+      if (target && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(target.tagName)) return;
+      ev.preventDefault();
+      playPause();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [playPause]);
+
   useEffect(() => {
     // A share link bypasses the library entirely: load the shared score,
     // read-only, and nothing else.
