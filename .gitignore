@@ -5,3 +5,7 @@ dist/
 .env.*
 .DS_Store
 coverage/
+
+# Real Guitar Pro files for import testing are never committed. See corpus/README.md.
+corpus/*
+!corpus/README.md

@@ -1,0 +1,21 @@
+\title "Multitrack"
+\artist "CubScore Fixtures"
+\tempo 110
+.
+\track "Guitar"
+\staff{score tabs} \tuning e5 b4 g4 d4 a3 e3
+\instrument 30
+(0.6 0.5 0.4).4 (0.6 0.5 0.4).4 (3.6 3.5 3.4).4 (3.6 3.5 3.4).4 |
+(5.6 5.5 5.4).2 (3.6 3.5 3.4).2 |
+
+\track "Bass"
+\staff{score tabs} \tuning g2 d2 a1 e1
+\instrument 33
+0.4.4 0.4.4 3.4.4 3.4.4 |
+5.4.2 3.4.2 |
+
+\track "Drums"
+\instrument percussion
+\articulation defaults
+("Kick (hit)" "Hi-Hat (closed)").8 "Hi-Hat (closed)".8 ("Snare (hit)" "Hi-Hat (closed)").8 "Hi-Hat (closed)".8 ("Kick (hit)" "Hi-Hat (closed)").8 "Hi-Hat (closed)".8 ("Snare (hit)" "Hi-Hat (closed)").8 "Hi-Hat (closed)".8 |
+("Kick (hit)" "Hi-Hat (closed)").8 "Hi-Hat (closed)".8 ("Snare (hit)" "Hi-Hat (closed)").8 "Hi-Hat (closed)".8 ("Kick (hit)" "Hi-Hat (closed)").8 "Hi-Hat (closed)".8 ("Snare (hit)" "Crash high (hit)").4 |

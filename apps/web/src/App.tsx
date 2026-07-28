@@ -1,132 +1,123 @@
 import { useEffect, useRef, useState } from "react";
-import * as alphaTab from "@coderline/alphatab";
-
-// Phase 0 spike: prove that alphaTab renders and plays a score in the
-// browser. The sample is alphaTex so the repo carries no binary assets;
-// .gp file loading is exercised by drag-and-drop below.
-const SAMPLE_TEX = String.raw`
-\title "CubScore Spike"
-\subtitle "Phase 0"
-\tempo 120
-.
-\track "Guitar"
-\staff {score tabs} \tuning e5 b4 g4 d4 a3 e3
-3.3.4 5.3.4 7.3.4 5.3.4 | 3.3.8 5.3.8 7.3.4 r.2 |
-0.4.4 0.4.4 2.4.4 3.4.4 | 5.4.1{v} |
-`;
-
-const ACCENT = "#F07D00";
+import { theme } from "./theme";
+import { useAlphaTab } from "./useAlphaTab";
+import { Toolbar } from "./components/Toolbar";
+import { TrackMixer } from "./components/TrackMixer";
+import { DEMO_SCORE } from "./demo";
 
 export function App() {
-  const hostRef = useRef<HTMLDivElement>(null);
-  const apiRef = useRef<alphaTab.AlphaTabApi | null>(null);
-  const [ready, setReady] = useState(false);
-  const [playing, setPlaying] = useState(false);
-  const [title, setTitle] = useState("");
+  const c = useAlphaTab();
+  const { loadTex } = c;
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [dragging, setDragging] = useState(false);
 
   useEffect(() => {
-    const host = hostRef.current;
-    if (!host) return;
-
-    const api = new alphaTab.AlphaTabApi(host, {
-      core: {
-        // The vite plugin copies assets to the site root, not next to the
-        // JS chunks where alphaTab looks by default.
-        fontDirectory: "/font/",
-      },
-      player: {
-        playerMode: alphaTab.PlayerMode.EnabledAutomatic,
-        soundFont: "/soundfont/sonivox.sf3",
-        enableCursor: true,
-        enableUserInteraction: true,
-      },
-      display: {
-        resources: {
-          mainGlyphColor: "#eeeeee",
-          secondaryGlyphColor: "#888888",
-          staffLineColor: "#555555",
-          barSeparatorColor: "#555555",
-          scoreInfoColor: "#eeeeee",
-        },
-      },
-    } as alphaTab.json.SettingsJson);
-    apiRef.current = api;
-
-    api.scoreLoaded.on((score) => {
-      setTitle(`${score.title || "Untitled"}${score.artist ? ` – ${score.artist}` : ""}`);
-    });
-    api.playerReady.on(() => setReady(true));
-    api.playerStateChanged.on((e) => {
-      setPlaying(e.state === alphaTab.synth.PlayerState.Playing);
-    });
-
-    api.tex(SAMPLE_TEX);
-
-    return () => {
-      apiRef.current = null;
-      api.destroy();
-    };
-  }, []);
-
-  const openFile = (file: File) => {
-    file.arrayBuffer().then((buffer) => {
-      apiRef.current?.load(new Uint8Array(buffer));
-    });
-  };
+    loadTex(DEMO_SCORE);
+  }, [loadTex]);
 
   return (
     <div
-      style={{ maxWidth: 960, margin: "0 auto", padding: 16 }}
-      onDragOver={(e) => e.preventDefault()}
+      style={{ maxWidth: 1100, margin: "0 auto", padding: 16 }}
+      onDragOver={(e) => {
+        e.preventDefault();
+        setDragging(true);
+      }}
+      onDragLeave={() => setDragging(false)}
       onDrop={(e) => {
         e.preventDefault();
+        setDragging(false);
         const file = e.dataTransfer.files[0];
-        if (file) openFile(file);
+        if (file) void c.loadFile(file);
       }}
     >
-      <header style={{ display: "flex", alignItems: "baseline", gap: 16, marginBottom: 12 }}>
-        <h1 style={{ color: ACCENT, fontSize: 24, margin: 0 }}>CubScore</h1>
-        <span style={{ color: "#888", fontSize: 12 }}>
-          Phase 0 spike – drop a .gp3/.gp4/.gp5/.gpx/.gp file anywhere to open it
-        </span>
+      <header style={{ display: "flex", alignItems: "baseline", gap: 12, marginBottom: 12, flexWrap: "wrap" }}>
+        <h1 style={{ color: theme.accent, fontSize: 24, margin: 0, letterSpacing: 1 }}>CubScore</h1>
+        {c.score && (
+          <span style={{ fontSize: 13, color: theme.text }}>
+            {c.score.title}
+            {c.score.artist && <span style={{ color: theme.textDim }}> — {c.score.artist}</span>}
+            <span style={{ color: theme.textDim }}> · {c.score.barCount} bars</span>
+          </span>
+        )}
+        <span style={{ flex: 1 }} />
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          style={{
+            fontFamily: theme.mono,
+            fontSize: 12,
+            padding: "6px 12px",
+            border: `1px solid ${theme.accent}`,
+            background: "transparent",
+            color: theme.accent,
+            cursor: "pointer",
+          }}
+        >
+          OPEN FILE
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".gp,.gp3,.gp4,.gp5,.gpx,.xml,.musicxml,.cap"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) void c.loadFile(file);
+            e.target.value = "";
+          }}
+        />
       </header>
 
-      <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 12 }}>
-        <button
-          onClick={() => apiRef.current?.playPause()}
-          disabled={!ready}
+      <Toolbar c={c} />
+      <TrackMixer c={c} />
+
+      {c.error && (
+        <div
           style={{
-            background: ready ? ACCENT : "#333",
-            color: "#080808",
-            border: "none",
-            padding: "8px 20px",
-            fontFamily: "inherit",
-            fontWeight: 700,
-            cursor: ready ? "pointer" : "default",
+            background: "#2a1010",
+            border: "1px solid #7a2020",
+            color: "#ffb0b0",
+            fontFamily: theme.mono,
+            fontSize: 12,
+            padding: 10,
+            marginBottom: 10,
+            whiteSpace: "pre-wrap",
           }}
         >
-          {playing ? "PAUSE" : "PLAY"}
-        </button>
-        <button
-          onClick={() => apiRef.current?.stop()}
-          disabled={!ready}
-          style={{
-            background: "#222",
-            color: "#eee",
-            border: "1px solid #444",
-            padding: "8px 20px",
-            fontFamily: "inherit",
-            cursor: ready ? "pointer" : "default",
-          }}
-        >
-          STOP
-        </button>
-        <span style={{ color: "#888", fontSize: 12 }}>{title}</span>
+          {c.error}
+        </div>
+      )}
+
+      <div
+        style={{
+          background: dragging ? "#1a1206" : theme.panel,
+          border: `1px solid ${dragging ? theme.accent : theme.border}`,
+          padding: 8,
+          position: "relative",
+          minHeight: 200,
+        }}
+      >
+        {c.rendering && (
+          <span
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 12,
+              fontFamily: theme.mono,
+              fontSize: 11,
+              color: theme.textDim,
+            }}
+          >
+            rendering…
+          </span>
+        )}
+        <div ref={c.hostRef} />
       </div>
 
-      <div style={{ background: "#111", border: "1px solid #333", padding: 8 }}>
-        <div ref={hostRef} />
-      </div>
+      <p style={{ fontFamily: theme.mono, fontSize: 11, color: theme.textDim, lineHeight: 1.7 }}>
+        Drop a .gp3/.gp4/.gp5/.gpx/.gp file anywhere to open it. Click a note to seek. Drag across
+        the score to select a loop region, then press LOOP. RAMP raises playback speed 5% after each
+        loop pass until it reaches 100%.
+      </p>
     </div>
   );
 }

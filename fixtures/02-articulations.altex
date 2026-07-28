@@ -1,0 +1,10 @@
+\title "Articulations"
+\artist "CubScore Fixtures"
+\tempo 100
+.
+\track "Guitar"
+\staff{score tabs} \tuning e5 b4 g4 d4 a3 e3
+0.6{pm}.8 0.6{pm}.8 3.6{pm}.8 0.6{pm}.8 5.6.4 r.4 |
+7.3{b (0 4)}.4 7.3{v}.4 12.3{nh}.4 r.4 |
+5.4{h}.8 7.4.8 7.4{sl}.8 9.4.8 x.5.8 x.5.8 5.4.4 |
+0.6{lr}.4 2.5{lr}.4 2.4.4 0.3.4 |

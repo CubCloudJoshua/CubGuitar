@@ -1,0 +1,10 @@
+\title "Tuplets and Meters"
+\artist "CubScore Fixtures"
+\tempo 90
+.
+\track "Guitar"
+\staff{score tabs} \tuning e5 b4 g4 d4 a3 e3
+5.3.8{tu 3} 7.3.8{tu 3} 8.3.8{tu 3} 5.3.8{tu 3} 7.3.8{tu 3} 8.3.8{tu 3} 5.3.4 r.4 |
+\ts 3 4 3.5.4 5.5.4 7.5.4 |
+\ts 7 8 3.5.8 5.5.8 7.5.8 8.5.8 7.5.8 5.5.8 3.5.8 |
+\ts 4 4 0.6.1 |
