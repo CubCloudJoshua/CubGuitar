@@ -1,10 +1,10 @@
-# CubGuitar Product Plan
+# CubScore Product Plan
 
-**Working name: CubGuitar.** The name is pending and does not need to stay guitar-bound. The product below is instrument-first but multi-instrument (guitar, bass, drums, keys, vocals), so the final name should leave room for that. Candidates to test: CubScore, CubStudio, CubTabs, CubStrings. Avoid collision with CubSound in the existing product line. Trademark search before launch.
+**Name: CubScore** (decided July 2026; repo predates the decision and keeps the CubScore slug for now). Instrument-first but multi-instrument, so the name leaves room beyond guitar. Trademark search before launch.
 
 **The tab editor the market should have built ten years ago.**
 
-CubGuitar is a web-first, AI-native music notation editor, player, and practice platform built and hosted on CubCloud sovereign infrastructure in Missoula. It targets the seat Guitar Pro has held since the late 90s and takes it by doing the three things no incumbent does: run everywhere with full parity, transcribe audio to editable tab in one click, and let two people edit the same score at the same time.
+CubScore is a web-first, AI-native music notation editor, player, and practice platform built and hosted on CubCloud sovereign infrastructure in Missoula. It targets the seat Guitar Pro has held since the late 90s and takes it by doing the three things no incumbent does: run everywhere with full parity, transcribe audio to editable tab in one click, and let two people edit the same score at the same time.
 
 ---
 
@@ -34,7 +34,7 @@ CubGuitar is a web-first, AI-native music notation editor, player, and practice 
 
 ### Why CubCloud wins this
 
-The AI features (transcription, stem separation, arrangement generation, practice feedback) need GPU inference. Competitors rent that from hyperscalers and price accordingly. We run H200/H100/RTX PRO 6000 capacity in Missoula, so inference is a cost we control, not a margin leak. CubGuitar also becomes a public proof point for the product-development pillar: a consumer-grade app built end to end on CubCloud metal, and a natural cross-sell surface for CubSound and CubLabs work.
+The AI features (transcription, stem separation, arrangement generation, practice feedback) need GPU inference. Competitors rent that from hyperscalers and price accordingly. We run H200/H100/RTX PRO 6000 capacity in Missoula, so inference is a cost we control, not a margin leak. CubScore also becomes a public proof point for the product-development pillar: a consumer-grade app built end to end on CubCloud metal, and a natural cross-sell surface for CubSound and CubLabs work.
 
 ---
 
@@ -46,13 +46,13 @@ Five platforms outside the guitar-software lane, each with one proven mechanic w
 
 Band-in-a-Box turns a typed chord progression plus a style pick into a full band arrangement (piano, bass, drums, guitar, horns) in seconds, including audio recordings of real session players. iReal Pro does a lighter version on mobile with 50+ styles and endless organic variation, and it owns the jam-session and jazz-education market.
 
-**Import: the Instant Band.** Enter a chord chart in CubGuitar, pick a style, and our AI generates a full backing arrangement as editable tracks in the score. Practice mode plays it with organic variation so it never loops stale. This runs as a generation workload on our GPUs and turns every chord chart in a user's library into a practice band. Nobody in the tab world has this; it collapses Band-in-a-Box, iReal Pro, and Guitar Pro into one screen.
+**Import: the Instant Band.** Enter a chord chart in CubScore, pick a style, and our AI generates a full backing arrangement as editable tracks in the score. Practice mode plays it with organic variation so it never loops stale. This runs as a generation workload on our GPUs and turns every chord chart in a user's library into a practice band. Nobody in the tab world has this; it collapses Band-in-a-Box, iReal Pro, and Guitar Pro into one screen.
 
 ### 2.2 BandLab (social creation and forking)
 
 BandLab is a free browser DAW with a social layer: fork any published project into your own editable copy, trace lineage through revision history, collaborate in real time, comment on specific sections, and distribute finished tracks to streaming platforms from inside the app.
 
-**Import: forking and score lineage.** Any publicly shared CubGuitar score can be forked. Forks keep a visible lineage chain (this arrangement descends from that one), which is how transcription communities actually work: someone posts a base transcription, others refine it. GitHub culture applied to tabs. Our op-log architecture makes this nearly free to build. Also import their "publish from inside the app" instinct: one-click share to an embeddable player is our version of their streaming distribution.
+**Import: forking and score lineage.** Any publicly shared CubScore score can be forked. Forks keep a visible lineage chain (this arrangement descends from that one), which is how transcription communities actually work: someone posts a base transcription, others refine it. GitHub culture applied to tabs. Our op-log architecture makes this nearly free to build. Also import their "publish from inside the app" instinct: one-click share to an embeddable player is our version of their streaming distribution.
 
 ### 2.3 Dorico (semantic notation, separation of content and layout)
 
@@ -76,7 +76,7 @@ Splice built a subscription business around a searchable marketplace of sounds w
 
 Gigging and worship musicians run their shows from tablet reading apps: setlists, annotations in rehearsal, Bluetooth pedal page turns, dark stage-friendly display, and leader-pushed setlists that sync to every band member's device. These apps read static PDFs and chord charts; none of them render living, playable scores.
 
-**Import: Perform mode.** A distraction-free reading view for live use: setlist builder, half-page turns via Bluetooth pedal or auto-scroll at tempo, stage-dark theme, per-member annotation layers, and band-synced setlists where the leader's changes land on everyone's device before downbeat. Because our scores are semantic rather than PDFs, Perform mode adds what the reading apps cannot: transpose the whole setlist for a capo or a horn player in one tap, and follow-along highlighting if playback runs. This is the "music reading platform" half of the vision and the feature that makes CubGuitar a daily tool for working musicians, not just a practice-room tool.
+**Import: Perform mode.** A distraction-free reading view for live use: setlist builder, half-page turns via Bluetooth pedal or auto-scroll at tempo, stage-dark theme, per-member annotation layers, and band-synced setlists where the leader's changes land on everyone's device before downbeat. Because our scores are semantic rather than PDFs, Perform mode adds what the reading apps cannot: transpose the whole setlist for a capo or a horn player in one tap, and follow-along highlighting if playback runs. This is the "music reading platform" half of the vision and the feature that makes CubScore a daily tool for working musicians, not just a practice-room tool.
 
 ### Also adopted from the direct competitor pass
 
@@ -109,7 +109,7 @@ Compose, transcribe, practice, and collaborate on music from any device, with AI
 
 **P4. Collaboration and cloud.** CRDT-based real-time co-editing, presence cursors, comments anchored to bars, share links with view/comment/edit roles, named version history, organizations (bands, studios, schools), and forking of public scores with visible lineage. This is the feature set no incumbent can bolt onto a 25-year-old desktop codebase.
 
-**P5. Perform and publish (artists and working musicians).** Perform mode for live reading: setlists, pedal page turns, auto-scroll, stage-dark theme, one-tap setlist transposition, band-synced setlists with per-member annotation layers. Artist storefronts for publishing: an artist posts official interactive tabs and charts of their own songs, sells them or bundles them with lessons, and embeds the player on their own site. This is the direct hook for CubCloud artist clients: every artist site or app CubLabs builds gets a CubGuitar-powered tab store as a line item, and every storefront artist becomes a distribution channel for the platform.
+**P5. Perform and publish (artists and working musicians).** Perform mode for live reading: setlists, pedal page turns, auto-scroll, stage-dark theme, one-tap setlist transposition, band-synced setlists with per-member annotation layers. Artist storefronts for publishing: an artist posts official interactive tabs and charts of their own songs, sells them or bundles them with lessons, and embeds the player on their own site. This is the direct hook for CubCloud artist clients: every artist site or app CubLabs builds gets a CubScore-powered tab store as a line item, and every storefront artist becomes a distribution channel for the platform.
 
 **P6. Compatibility.** Import .gp3/.gp4/.gp5/.gpx/.gp, MusicXML, and MIDI. Export .gp, MusicXML, MIDI, PDF, PNG, and audio (WAV/MP3 render). Perfect Guitar Pro import is table stakes: the world's tabs live in that format, and switching cost is zero only if their back catalog opens flawlessly.
 
