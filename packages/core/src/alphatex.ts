@@ -38,13 +38,27 @@ const NOTE_EFFECTS: Partial<Record<Articulation, string>> = {
   tremolo: "tr",
 };
 
-function noteToken(beat: Beat, instrument: Instrument): string {
+/** Strings whose note carries into the next beat, for tie destinations. */
+function tiedStrings(beat: Beat): Set<number> {
+  const out = new Set<number>();
+  for (const note of beat.notes) {
+    if (note.tiedToNext && note.string !== undefined) out.add(note.string);
+  }
+  return out;
+}
+
+function noteToken(beat: Beat, instrument: Instrument, tiedFromPrev: Set<number>): string {
   const parts = beat.notes.map((note) => {
     const effects = note.articulations
       .map((a) => NOTE_EFFECTS[a])
       .filter((e): e is string => e !== undefined);
     const suffix = effects.length > 0 ? `{${effects.join(" ")}}` : "";
 
+    // A tie destination is written as a dash on its string; alphaTab restores
+    // the pitch from the origin. Verified against the parser.
+    if (note.string !== undefined && tiedFromPrev.has(note.string)) {
+      return `-.${note.string}${suffix}`;
+    }
     if (note.articulations.includes("deadNote")) {
       return `x.${note.string ?? 1}${suffix}`;
     }
@@ -59,8 +73,8 @@ function noteToken(beat: Beat, instrument: Instrument): string {
   return `(${parts.join(" ")})`;
 }
 
-function beatToTex(beat: Beat, instrument: Instrument): string {
-  let token = `${noteToken(beat, instrument)}.${beat.duration.denominator}`;
+function beatToTex(beat: Beat, instrument: Instrument, tiedFromPrev: Set<number>): string {
+  let token = `${noteToken(beat, instrument, tiedFromPrev)}.${beat.duration.denominator}`;
   const properties: string[] = [];
   if (beat.dots === 1) properties.push("d");
   if (beat.dots === 2) properties.push("dd");
@@ -69,7 +83,8 @@ function beatToTex(beat: Beat, instrument: Instrument): string {
   return token;
 }
 
-function barToTex(bar: Bar, instrument: Instrument): string {
+/** Bar-level directives (meter, tempo, repeats) belong to the first voice only. */
+function barPrefix(bar: Bar): string[] {
   const prefix: string[] = [];
   if (bar.timeSignature) prefix.push(`\\ts ${bar.timeSignature.beats} ${bar.timeSignature.beatValue}`);
   if (bar.tempoBpm !== undefined) prefix.push(`\\tempo ${bar.tempoBpm}`);
@@ -77,17 +92,33 @@ function barToTex(bar: Bar, instrument: Instrument): string {
   // Repeat close must lead the bar it belongs to. Written after the beats it
   // binds to the *next* bar instead, which adds a bar on every round trip.
   if (bar.repeat?.endCount) prefix.push(`\\rc ${bar.repeat.endCount}`);
+  return prefix;
+}
 
-  // Multi-voice bars are Phase 2; the editor writes a single voice today.
-  const voice = bar.voices[0];
-  // An empty bar must still emit a rest, or alphaTex sees a stray separator
-  // and the bar count drifts on every round trip.
-  const beats =
-    voice && voice.beats.length > 0
-      ? voice.beats.map((b) => beatToTex(b, instrument)).join(" ")
-      : "r.1";
-
-  return `${prefix.length > 0 ? `${prefix.join(" ")} ` : ""}${beats}`;
+/** One voice's bars for a whole track, with tie state carried across barlines. */
+function voiceLineToTex(track: Track, voiceIndex: number): string {
+  let tied = new Set<number>();
+  const bars = track.bars.map((bar) => {
+    const prefix = voiceIndex === 0 ? barPrefix(bar) : [];
+    const voice = bar.voices[voiceIndex];
+    let beats: string;
+    if (voice && voice.beats.length > 0) {
+      beats = voice.beats
+        .map((beat) => {
+          const token = beatToTex(beat, track.instrument, tied);
+          tied = tiedStrings(beat);
+          return token;
+        })
+        .join(" ");
+    } else {
+      // An empty bar must still emit a rest, or alphaTex sees a stray
+      // separator and the bar count drifts on every round trip.
+      beats = "r.1";
+      tied = new Set();
+    }
+    return `${prefix.length > 0 ? `${prefix.join(" ")} ` : ""}${beats}`;
+  });
+  return bars.join(" |\n");
 }
 
 function trackToTex(track: Track): string {
@@ -104,8 +135,15 @@ function trackToTex(track: Track): string {
     lines.push("\\articulation defaults");
   }
 
-  const bars = track.bars.map((bar) => barToTex(bar, track.instrument));
-  lines.push(bars.join(" |\n"));
+  const voiceCount = Math.max(1, ...track.bars.map((bar) => bar.voices.length));
+  if (voiceCount === 1) {
+    lines.push(voiceLineToTex(track, 0));
+  } else {
+    for (let v = 0; v < voiceCount; v++) {
+      lines.push("\\voice");
+      lines.push(voiceLineToTex(track, v));
+    }
+  }
   return lines.join("\n");
 }
 

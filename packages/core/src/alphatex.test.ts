@@ -88,6 +88,43 @@ describe("toAlphaTex", () => {
     expect(tex).toContain("\\title \"The 'Best' Song\"");
   });
 
+  it("writes tie destinations as a dash and carries ties across barlines", () => {
+    const score = createScore("t");
+    const track = trackOf(score);
+    const note = createNote(59, 2, 8);
+    const tiedOrigin = { ...note, tiedToNext: true };
+    const bars = track.bars.map((bar, i) => {
+      const voice = bar.voices[0]!;
+      if (i === 0) {
+        // Last beat of bar 1 ties into bar 2.
+        const beats = voice.beats.map((b, j) =>
+          j === voice.beats.length - 1 ? { ...b, notes: [tiedOrigin] } : b,
+        );
+        return { ...bar, voices: [{ ...voice, beats }] };
+      }
+      if (i === 1) {
+        const beats = voice.beats.map((b, j) => (j === 0 ? { ...b, notes: [{ ...note }] } : b));
+        return { ...bar, voices: [{ ...voice, beats }] };
+      }
+      return bar;
+    });
+    const tex = toAlphaTex({ ...score, tracks: [{ ...track, bars }] });
+    expect(tex).toContain("8.2");
+    expect(tex).toContain("-.2");
+  });
+
+  it("emits \\voice sections for multi-voice tracks, directives on the first only", () => {
+    const score = createScore("t");
+    const track = trackOf(score);
+    const second = { id: "v2", beats: track.bars[0]!.voices[0]!.beats.map((b) => ({ ...b })) };
+    const bars = track.bars.map((bar, i) =>
+      i === 0 ? { ...bar, voices: [...bar.voices, second] } : bar,
+    );
+    const tex = toAlphaTex({ ...score, tracks: [{ ...track, bars }] });
+    expect(tex.match(/\\voice/g)).toHaveLength(2);
+    expect(tex.match(/\\ts 4 4/g)).toHaveLength(1);
+  });
+
   it("writes dead notes as x on the string", () => {
     const score = createScore("t");
     const track = trackOf(score);

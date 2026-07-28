@@ -18,7 +18,7 @@ Phase 1 mostly done, Phase 2 started. Working today:
 
 Not built yet: accounts (share links exist, but nothing is owned or listable yet), cloud sync of the library, real-time collaboration, and all AI features.
 
-Imported Guitar Pro files are editable: an import is converted to the semantic model, and pressing EDIT opens it with a report of anything the model could not carry. Percussion is the notable gap — drum tracks play faithfully in the player but are dropped from the editable version rather than converted into notation that would be wrong. Multiple voices per bar, alternate endings, chord diagrams, and detailed bend curves are reported the same way.
+Imported Guitar Pro files are editable: an import is converted to the semantic model, and pressing EDIT opens it with a report of anything the model could not carry. Multiple voices per bar and ties survive the conversion and round-trip exactly. Percussion is the notable gap — drum tracks play faithfully in the player but are dropped from the editable version rather than converted into notation that would be wrong. Alternate endings, chord diagrams, section markers, and detailed bend curves are reported the same way.
 
 Undo uses document snapshots rather than inverse operations; the op log is recorded but not yet replayed, which is the work that lands with sync.
 

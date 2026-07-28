@@ -145,9 +145,9 @@ function barOf(
   if (out.voices.length === 0) {
     out.voices = [{ id: nextId("v"), beats: [] }];
   }
-  if (out.voices.length > 1) {
-    ctx.unsupported.add("multiple voices per bar (only the first is editable)");
-  }
+  // Additional voices are carried through the model and serializer; the
+  // editor's caret only reaches the first voice today, which is an editor
+  // limitation rather than data loss, so it is not reported as unsupported.
 
   const ts: TimeSignature = {
     beats: master.timeSignatureNumerator,
