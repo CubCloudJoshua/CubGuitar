@@ -17,7 +17,9 @@ Phase 1 mostly done, Phase 2 started. Working today:
 
 Not built yet: accounts and cloud sync, real-time collaboration, and all AI features.
 
-Two current limitations worth knowing. Imported Guitar Pro files are play-only: editing needs an alphaTab-model-to-core importer that does not exist yet, so only scores authored in CubScore are editable. And undo uses document snapshots rather than inverse operations; the op log is recorded but not yet replayed, which is the work that lands with sync.
+Imported Guitar Pro files are editable: an import is converted to the semantic model, and pressing EDIT opens it with a report of anything the model could not carry. Percussion is the notable gap — drum tracks play faithfully in the player but are dropped from the editable version rather than converted into notation that would be wrong. Multiple voices per bar, alternate endings, chord diagrams, and detailed bend curves are reported the same way.
+
+Undo uses document snapshots rather than inverse operations; the op log is recorded but not yet replayed, which is the work that lands with sync.
 
 Rendering and playback come from [alphaTab](https://github.com/CoderLine/alphaTab); PLAN.md Phase 2 replaces it with our own engine. Its license needs a legal check before launch.
 
@@ -28,6 +30,7 @@ The semantic score model in `packages/core` is the source of truth for authored 
 ## Layout
 
 - `packages/core` — semantic score model, operation log, op application, and the alphaTex serializer
+- `packages/formats` — alphaTab-model-to-core import, with a report of what the model cannot carry
 - `apps/web` — the React app
 - `fixtures/` — original alphaTex scores, committed, run in CI
 - `corpus/` — real Guitar Pro files for import testing, gitignored (see `corpus/README.md`)
@@ -45,3 +48,10 @@ pnpm corpus     # load and render every score in fixtures/ and corpus/
 `pnpm corpus` runs the built app in headless Chromium, so run `pnpm build` first. It
 reports track, bar, and note counts per score, prints alphaTab diagnostics for
 failures, and exits non-zero if any score fails to parse or render.
+
+It also measures import fidelity by round-tripping every score through
+alphaTab → core → alphaTex → alphaTab and comparing note counts *and* the
+multiset of MIDI pitches on both sides. The pitch comparison exists because
+counts alone hide the failures that matter: it is what caught a string-numbering
+inversion that left every note transposed two octaves while all the counts
+matched. Any pitch drift fails the run.

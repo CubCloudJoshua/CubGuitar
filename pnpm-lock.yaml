@@ -20,6 +20,9 @@ importers:
       '@cubscore/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@cubscore/formats':
+        specifier: workspace:*
+        version: link:../../packages/formats
       react:
         specifier: ^18.3.0
         version: 18.3.1
@@ -50,6 +53,19 @@ importers:
         version: 6.4.3(@types/node@26.1.2)
 
   packages/core:
+    devDependencies:
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
+
+  packages/formats:
+    dependencies:
+      '@coderline/alphatab':
+        specifier: ^1.8.0
+        version: 1.8.4
+      '@cubscore/core':
+        specifier: workspace:*
+        version: link:../core
     devDependencies:
       typescript:
         specifier: ^5.6.0

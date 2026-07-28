@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Score as CoreScore } from "@cubscore/core";
+import { fromAlphaTab, type ImportReport } from "@cubscore/formats";
 import { theme } from "./theme";
 import { useAlphaTab } from "./useAlphaTab";
 import { useNarrow } from "./useNarrow";
@@ -39,6 +40,7 @@ export function App() {
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [importNotice, setImportNotice] = useState<ImportReport | null>(null);
 
   const refresh = useCallback(async () => {
     setEntries(await listEntries());
@@ -65,11 +67,26 @@ export function App() {
   }, [loadTex, loadBytes]);
 
   // Imported scores only report their metadata after alphaTab parses them.
+  // The same pass converts to the semantic model so the file becomes editable.
   useEffect(() => {
     const pending = pendingRef.current;
     if (!pending || !c.score) return;
     pendingRef.current = null;
     void (async () => {
+      let core: string | null = null;
+      let report: string | null = null;
+      const parsed = c.getScore();
+      if (parsed) {
+        try {
+          const converted = fromAlphaTab(parsed);
+          core = JSON.stringify(converted.score);
+          report = JSON.stringify(converted.report);
+        } catch (err) {
+          // A failed conversion must not lose the import: the file still
+          // plays, it just stays read-only.
+          console.warn("core conversion failed", err);
+        }
+      }
       await putEntry({
         id: pending.id,
         title: c.score?.title ?? "Untitled",
@@ -77,7 +94,9 @@ export function App() {
         format: pending.format,
         bytes: pending.bytes,
         tex: pending.tex,
-        core: null,
+        core,
+        report,
+        authored: false,
         fileName: pending.fileName,
         addedAt: pending.addedAt,
         openedAt: Date.now(),
@@ -87,7 +106,7 @@ export function App() {
       setCurrentId(pending.id);
       await refresh();
     })();
-  }, [c.score, c.tracks, refresh]);
+  }, [c.score, c.tracks, c.getScore, refresh]);
 
   // The editor owns the document in edit mode; alphaTab just renders it.
   const editorTex = editor.tex;
@@ -120,6 +139,8 @@ export function App() {
           bytes: null,
           tex: editorTex,
           core: JSON.stringify(editorScore),
+          report: null,
+          authored: true,
           fileName: null,
           addedAt: target.addedAt,
           openedAt: Date.now(),
@@ -132,8 +153,20 @@ export function App() {
     return () => clearTimeout(timer);
   }, [mode, editorScore, editorTex, refresh]);
 
+  /** Converts the open imported score into an editable document. */
+  const editImported = useCallback(() => {
+    const entry = entries.find((e) => e.id === currentId);
+    if (!entry?.core) return;
+    editor.loadScore(JSON.parse(entry.core) as CoreScore);
+    editorEntryRef.current = { id: entry.id, addedAt: entry.addedAt };
+    setImportNotice(entry.report ? (JSON.parse(entry.report) as ImportReport) : null);
+    setMode("edit");
+    void putEntry({ ...entry, authored: true, openedAt: Date.now() }).then(refresh);
+  }, [entries, currentId, editor, refresh]);
+
   const startNewScore = useCallback(() => {
     editor.newScore();
+    setImportNotice(null);
     const target = { id: newId(), addedAt: Date.now() };
     editorEntryRef.current = target;
     setCurrentId(target.id);
@@ -162,12 +195,15 @@ export function App() {
   const openEntry = useCallback(
     async (entry: LibraryEntry) => {
       setCurrentId(entry.id);
-      if (entry.core) {
-        // Authored here, so it reopens in the editor with history intact.
+      setImportNotice(null);
+      if (entry.authored && entry.core) {
+        // Authored here, so it reopens in the editor.
         editor.loadScore(JSON.parse(entry.core) as CoreScore);
         editorEntryRef.current = { id: entry.id, addedAt: entry.addedAt };
         setMode("edit");
       } else {
+        // Imported files open in the player, where alphaTab renders the
+        // original faithfully. Editing is an explicit step.
         setMode("play");
         if (entry.tex !== null) loadTex(entry.tex);
         else if (entry.bytes) loadBytes(entry.bytes);
@@ -194,6 +230,7 @@ export function App() {
 
   const showLibrary = !narrow || libraryOpen;
   const editing = mode === "edit";
+  const canEditCurrent = entries.some((e) => e.id === currentId && e.core !== null);
 
   return (
     <div
@@ -221,6 +258,9 @@ export function App() {
           <button onClick={() => setLibraryOpen((v) => !v)} style={headerButton}>LIBRARY</button>
         )}
         <button onClick={startNewScore} style={headerButton}>NEW</button>
+        {!editing && canEditCurrent && (
+          <button onClick={editImported} style={headerButton}>EDIT</button>
+        )}
         {editing && (
           <button onClick={() => setMode("play")} style={headerButton}>PLAYER</button>
         )}
@@ -240,6 +280,45 @@ export function App() {
       </header>
 
       {editing && <EditorBar e={editor} enabled={editing} />}
+
+      {editing && importNotice && importNotice.unsupported.length > 0 && (
+        <div
+          style={{
+            background: "#241a06",
+            border: `1px solid ${theme.accent}`,
+            color: theme.text,
+            fontFamily: theme.mono,
+            fontSize: 11,
+            padding: 10,
+            marginBottom: 10,
+            lineHeight: 1.7,
+          }}
+        >
+          <strong style={{ color: theme.accentBright }}>
+            Converted for editing. {importNotice.noteCount} notes across{" "}
+            {importNotice.trackCount} tracks.
+          </strong>
+          <br />
+          The semantic model does not carry these yet, so they are absent from the editable
+          version (the original import is untouched in the library):
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18 }}>
+            {importNotice.unsupported.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+          <button
+            onClick={() => setImportNotice(null)}
+            style={{
+              marginTop: 8, fontFamily: theme.mono, fontSize: 11, padding: "4px 10px",
+              background: "transparent", border: `1px solid ${theme.border}`,
+              color: theme.textDim, cursor: "pointer",
+            }}
+          >
+            DISMISS
+          </button>
+        </div>
+      )}
+
       <Toolbar c={c} />
 
       {c.error && (

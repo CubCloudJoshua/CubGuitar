@@ -5,7 +5,7 @@ export const DEMO_SCORE = String.raw`
 \tempo 110
 .
 \track "Guitar"
-\staff{score tabs} \tuning e5 b4 g4 d4 a3 e3
+\staff{score tabs} \tuning e4 b3 g3 d3 a2 e2
 \instrument 30
 0.6{pm}.8 0.6{pm}.8 3.6.8 0.6{pm}.8 5.6.4 3.6.4 |
 0.6{pm}.8 0.6{pm}.8 3.6.8 0.6{pm}.8 7.6.4 5.6.4 |

@@ -92,22 +92,41 @@ async function main() {
       console.log(core.tex);
     }
 
+    const trips = [];
+
     for (const file of fixtures) {
       const tex = await readFile(file, "utf8");
+      const name = path.relative(ROOT, file);
       lastDiagnostics = "";
       const result = await page.evaluate((t) => window.cubscore.loadTex(t), tex);
-      results.push({ name: path.relative(ROOT, file), diagnostics: lastDiagnostics, ...result });
+      results.push({ name, diagnostics: lastDiagnostics, ...result });
+      lastDiagnostics = "";
+      const trip = await page.evaluate((t) => window.cubscore.roundTripTex(t), tex);
+      trips.push({ name, diagnostics: lastDiagnostics, ...trip });
     }
 
     for (const file of corpus) {
       const bytes = Array.from(await readFile(file));
+      const name = path.relative(ROOT, file);
       lastDiagnostics = "";
       const result = await page.evaluate((b) => window.cubscore.loadBytes(b), bytes);
-      results.push({ name: path.relative(ROOT, file), diagnostics: lastDiagnostics, ...result });
+      results.push({ name, diagnostics: lastDiagnostics, ...result });
+      lastDiagnostics = "";
+      const trip = await page.evaluate((b) => window.cubscore.roundTripBytes(b), bytes);
+      trips.push({ name, diagnostics: lastDiagnostics, ...trip });
     }
 
     report(results, fixtures.length, corpus.length);
-    process.exitCode = results.some((r) => !r.ok) ? 1 : 0;
+    reportRoundTrips(trips);
+    const failed =
+      results.some((r) => !r.ok) ||
+      trips.some(
+        (t) =>
+          !t.ok ||
+          (t.pitchDrift?.missing.length ?? 0) > 0 ||
+          (t.pitchDrift?.added.length ?? 0) > 0,
+      );
+    process.exitCode = failed ? 1 : 0;
   } finally {
     await browser?.close();
     server.kill();
@@ -144,6 +163,58 @@ function report(results, fixtureCount, corpusCount) {
     console.log("");
     console.log("Note: corpus/ is empty. Drop real .gp files there to exercise the importers.");
     console.log("See corpus/README.md.");
+  }
+}
+
+/**
+ * Import fidelity: alphaTab -> core -> alphaTex -> alphaTab. A drop in counts
+ * means the semantic model lost something, which is exactly what has to be
+ * known before editing is built on imported files.
+ */
+function reportRoundTrips(trips) {
+  const pad = (s, n) => String(s ?? "").padEnd(n);
+  console.log("");
+  console.log("IMPORT ROUND TRIP (alphaTab -> core -> alphaTex -> alphaTab)");
+  console.log(
+    `${pad("SCORE", 34)}${pad("OK", 4)}${pad("TRACKS", 8)}${pad("BARS", 8)}${pad("NOTES", 10)}${pad("PITCHES", 9)}LOSS`,
+  );
+  console.log("-".repeat(100));
+
+  let pitchProblems = 0;
+  for (const t of trips) {
+    if (!t.ok) {
+      console.log(`${pad(t.name, 34)}${pad("NO", 4)}${t.error}`);
+      continue;
+    }
+    const o = t.original;
+    const c = t.converted;
+    const cmp = (a, b) => (a === b ? `${a}` : `${a}->${b}`);
+    const lost = o.notes - c.notes;
+    const drift = t.pitchDrift ?? { missing: [], added: [] };
+    const clean = drift.missing.length === 0 && drift.added.length === 0;
+    if (!clean) pitchProblems += 1;
+    console.log(
+      `${pad(t.name, 34)}${pad("yes", 4)}${pad(cmp(o.tracks, c.tracks), 8)}` +
+        `${pad(cmp(o.bars, c.bars), 8)}${pad(cmp(o.notes, c.notes), 10)}` +
+        `${pad(clean ? "exact" : "DRIFT", 9)}` +
+        (lost === 0 ? "none" : `${lost} notes (drums)`),
+    );
+    if (!clean) {
+      console.log(`    missing: ${drift.missing.slice(0, 16).join(", ") || "-"}`);
+      console.log(`    added:   ${drift.added.slice(0, 16).join(", ") || "-"}`);
+    }
+  }
+  if (pitchProblems > 0) {
+    console.log("");
+    console.log(`${pitchProblems} score(s) changed pitch through the conversion.`);
+  }
+
+  const unsupported = new Set();
+  for (const t of trips) for (const u of t.unsupported ?? []) unsupported.add(u);
+  if (unsupported.size > 0) {
+    console.log("");
+    console.log("Not carried by the semantic model yet:");
+    for (const u of [...unsupported].sort()) console.log(`  - ${u}`);
   }
 }
 

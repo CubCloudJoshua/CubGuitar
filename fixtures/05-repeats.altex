@@ -3,7 +3,7 @@
 \tempo 130
 .
 \track "Guitar"
-\staff{score tabs} \tuning e5 b4 g4 d4 a3 e3
+\staff{score tabs} \tuning e4 b3 g3 d3 a2 e2
 \ro 3.6.4 5.6.4 7.6.4 5.6.4 |
 3.6.4 5.6.4 7.6.4 8.6.4 \rc 2 |
 10.6.2 8.6.2 |

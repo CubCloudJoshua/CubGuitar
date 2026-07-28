@@ -28,6 +28,10 @@ export interface LibraryEntry {
    * imported files have no core model until the Phase 2 importer lands.
    */
   core: string | null;
+  /** JSON ImportReport: what the conversion to the core model could not carry. */
+  report: string | null;
+  /** Authored in CubScore, so it reopens in the editor rather than the player. */
+  authored: boolean;
   fileName: string | null;
   addedAt: number;
   openedAt: number;

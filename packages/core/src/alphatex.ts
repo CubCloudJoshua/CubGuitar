@@ -11,12 +11,13 @@ import type { Articulation, Bar, Beat, Instrument, Score, Track } from "./score.
 const NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"] as const;
 
 /**
- * alphaTab names octaves one higher than scientific pitch notation: MIDI 64
- * (scientific E4, a guitar's high E) is written e5.
+ * Scientific pitch notation, which is what alphaTex parses: a guitar's high E
+ * (MIDI 64) is E4, and alphaTab reads that back as 64. Verified against the
+ * parser, not assumed.
  */
 function pitchToName(midi: number): string {
   const name = NOTE_NAMES[((midi % 12) + 12) % 12] ?? "C";
-  return `${name}${Math.floor(midi / 12)}`;
+  return `${name}${Math.floor(midi / 12) - 1}`;
 }
 
 /** Note-level effects, written between the string and the duration. */
@@ -73,13 +74,20 @@ function barToTex(bar: Bar, instrument: Instrument): string {
   if (bar.timeSignature) prefix.push(`\\ts ${bar.timeSignature.beats} ${bar.timeSignature.beatValue}`);
   if (bar.tempoBpm !== undefined) prefix.push(`\\tempo ${bar.tempoBpm}`);
   if (bar.repeat?.start) prefix.push("\\ro");
+  // Repeat close must lead the bar it belongs to. Written after the beats it
+  // binds to the *next* bar instead, which adds a bar on every round trip.
+  if (bar.repeat?.endCount) prefix.push(`\\rc ${bar.repeat.endCount}`);
 
   // Multi-voice bars are Phase 2; the editor writes a single voice today.
   const voice = bar.voices[0];
-  const beats = voice ? voice.beats.map((b) => beatToTex(b, instrument)).join(" ") : "r.1";
+  // An empty bar must still emit a rest, or alphaTex sees a stray separator
+  // and the bar count drifts on every round trip.
+  const beats =
+    voice && voice.beats.length > 0
+      ? voice.beats.map((b) => beatToTex(b, instrument)).join(" ")
+      : "r.1";
 
-  const suffix = bar.repeat?.endCount ? ` \\rc ${bar.repeat.endCount}` : "";
-  return `${prefix.length > 0 ? `${prefix.join(" ")} ` : ""}${beats}${suffix}`;
+  return `${prefix.length > 0 ? `${prefix.join(" ")} ` : ""}${beats}`;
 }
 
 function trackToTex(track: Track): string {
@@ -105,8 +113,19 @@ export function toAlphaTex(score: Score): string {
   const header = [`\\title "${score.title.replace(/"/g, "'")}"`];
   if (score.artist) header.push(`\\artist "${score.artist.replace(/"/g, "'")}"`);
   header.push(".");
-  return `${header.join("\n")}\n${score.tracks.map(trackToTex).join("\n\n")}\n`;
+  // Percussion needs articulation names the model does not carry yet, so drum
+  // tracks are omitted rather than serialized into notation that would be wrong.
+  const tracks = score.tracks.filter((t) => t.instrument.kind !== "drums");
+  const body = tracks.length > 0 ? tracks.map(trackToTex).join("\n\n") : trackToTex(EMPTY_TRACK);
+  return `${header.join("\n")}\n${body}\n`;
 }
+
+const EMPTY_TRACK: Track = {
+  id: "empty",
+  name: "Guitar",
+  instrument: { kind: "fretted", tuning: [64, 59, 55, 50, 45, 40], frets: 24, capo: 0 },
+  bars: [{ id: "empty-bar", voices: [] }],
+};
 
 const QUARTER_TICKS = 960;
 

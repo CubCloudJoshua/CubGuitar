@@ -19,6 +19,7 @@ import {
   type OpKind,
   type Score,
 } from "@cubscore/core";
+import { fromAlphaTab } from "@cubscore/formats";
 
 export interface LoadResult {
   ok: boolean;
@@ -32,12 +33,30 @@ export interface LoadResult {
   renderMs?: number;
 }
 
+/**
+ * Fidelity of alphaTab -> core -> alphaTex -> alphaTab. Counts on both sides
+ * are what tell us whether the importer is safe to build editing on.
+ */
+export interface RoundTripResult {
+  ok: boolean;
+  error?: string;
+  original?: Stats;
+  converted?: Stats;
+  /** Pitches present before but not after (or vice versa), as MIDI numbers. */
+  pitchDrift?: { missing: number[]; added: number[] };
+  unsupported?: string[];
+  tex?: string;
+}
+
 declare global {
   interface Window {
     cubscore: {
       loadTex(tex: string): Promise<LoadResult>;
       loadBytes(bytes: number[]): Promise<LoadResult>;
       checkCore(): Promise<LoadResult & { tex: string }>;
+      roundTripTex(tex: string): Promise<RoundTripResult>;
+      roundTripBytes(bytes: number[]): Promise<RoundTripResult>;
+      describeTex(tex: string): Promise<unknown>;
     };
   }
 }
@@ -51,20 +70,54 @@ const api = new alphaTab.AlphaTabApi(host, {
   player: { playerMode: alphaTab.PlayerMode.Disabled },
 } as alphaTab.json.SettingsJson);
 
-function countNotes(score: alphaTab.model.Score): number {
-  let n = 0;
+export interface Stats {
+  tracks: number;
+  bars: number;
+  notes: number;
+  /** Sorted MIDI pitches, so a wrong tuning shows up even when counts match. */
+  pitches: number[];
+}
+
+function collect(score: alphaTab.model.Score, skipPercussion: boolean): Stats {
+  const pitches: number[] = [];
   for (const track of score.tracks) {
     for (const staff of track.staves) {
+      if (skipPercussion && staff.isPercussion) continue;
       for (const bar of staff.bars) {
         for (const voice of bar.voices) {
           for (const beat of voice.beats) {
-            n += beat.notes.length;
+            for (const note of beat.notes) pitches.push(note.realValue);
           }
         }
       }
     }
   }
-  return n;
+  pitches.sort((a, b) => a - b);
+  return {
+    tracks: score.tracks.length,
+    bars: score.masterBars.length,
+    notes: pitches.length,
+    pitches,
+  };
+}
+
+function countNotes(score: alphaTab.model.Score): number {
+  return collect(score, false).notes;
+}
+
+/** Multiset difference, so repeated pitches are compared honestly. */
+function diffPitches(before: number[], after: number[]) {
+  const counts = new Map<number, number>();
+  for (const p of before) counts.set(p, (counts.get(p) ?? 0) + 1);
+  const added: number[] = [];
+  for (const p of after) {
+    const n = counts.get(p) ?? 0;
+    if (n > 0) counts.set(p, n - 1);
+    else added.push(p);
+  }
+  const missing: number[] = [];
+  for (const [pitch, n] of counts) for (let i = 0; i < n; i++) missing.push(pitch);
+  return { missing: missing.sort((a, b) => a - b), added: added.sort((a, b) => a - b) };
 }
 
 /** Resolves on the first render pass or error after `trigger` runs. */
@@ -177,10 +230,71 @@ function buildCoreSample(): Score {
   return score;
 }
 
+async function roundTrip(trigger: () => void): Promise<RoundTripResult> {
+  const first = await run(trigger);
+  if (!first.ok) return { ok: false, error: first.error ?? "source failed to load" };
+
+  const source = api.score;
+  if (!source) return { ok: false, error: "no score after load" };
+  // Percussion is deliberately dropped by the importer, so exclude it from the
+  // pitch comparison rather than reporting it as drift.
+  const original = collect(source, true);
+  original.tracks = source.tracks.length;
+
+  let tex: string;
+  let unsupported: string[];
+  try {
+    const converted = fromAlphaTab(source);
+    unsupported = converted.report.unsupported;
+    tex = toAlphaTex(converted.score);
+  } catch (e) {
+    return { ok: false, error: `conversion threw: ${e instanceof Error ? e.message : String(e)}`, original };
+  }
+
+  const second = await run(() => api.tex(tex));
+  if (!second.ok) return { ok: false, error: `reload failed: ${second.error ?? "?"}`, original, tex, unsupported };
+
+  const after = api.score;
+  if (!after) return { ok: false, error: "no score after reload", original, tex, unsupported };
+
+  const converted = collect(after, true);
+  return {
+    ok: true,
+    original,
+    converted,
+    pitchDrift: diffPitches(original.pitches, converted.pitches),
+    unsupported,
+    tex,
+  };
+}
+
 window.cubscore = {
   loadTex: (tex) => run(() => api.tex(tex)),
   // Bytes cross the CDP boundary as a plain array.
   loadBytes: (bytes) => run(() => api.load(new Uint8Array(bytes))),
+  roundTripTex: (tex) => roundTrip(() => api.tex(tex)),
+  // Bar-level detail, for diagnosing where a round trip drifts.
+  describeTex: async (tex) => {
+    const result = await run(() => api.tex(tex));
+    const score = api.score;
+    if (!result.ok || !score) return { ok: false, error: result.error };
+    return {
+      ok: true,
+      tuning: score.tracks[0]?.staves[0]?.stringTuning.tunings ?? [],
+      notes: (score.tracks[0]?.staves[0]?.bars ?? []).flatMap((b, bi) =>
+        b.voices[0]?.beats.flatMap((beat) =>
+          beat.notes.map((n) => ({ bar: bi, string: n.string, fret: n.fret, pitch: n.realValue })),
+        ) ?? [],
+      ),
+      bars: score.masterBars.map((m, i) => ({
+        i,
+        repeatStart: m.isRepeatStart,
+        repeatCount: m.repeatCount,
+        beats: score.tracks[0]?.staves[0]?.bars[i]?.voices[0]?.beats.length ?? 0,
+      })),
+    };
+  },
+  roundTripBytes: (bytes) => roundTrip(() => api.load(new Uint8Array(bytes))),
   checkCore: async () => {
     const tex = toAlphaTex(buildCoreSample());
     const result = await run(() => api.tex(tex));
