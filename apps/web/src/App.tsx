@@ -12,6 +12,8 @@ import { ExportMenu } from "./components/ExportMenu";
 import { LibraryPanel } from "./library/LibraryPanel";
 import { deleteEntry, listEntries, newId, putEntry, type LibraryEntry } from "./library/db";
 import { base64ToBytes, fetchShared, shareEntry, sharedIdFromLocation } from "./share";
+import { useAuth } from "./auth/useAuth";
+import { AccountPanel } from "./auth/AccountPanel";
 import { DEMO_SCORE } from "./demo";
 
 type Mode = "play" | "edit";
@@ -44,6 +46,8 @@ export function App() {
   const [importNotice, setImportNotice] = useState<ImportReport | null>(null);
   /** Opened via a share link: read-only, no library. */
   const [sharedView] = useState(() => sharedIdFromLocation() !== null);
+  const auth = useAuth();
+  const [accountOpen, setAccountOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
@@ -341,6 +345,17 @@ export function App() {
           <button onClick={() => fileInputRef.current?.click()} style={headerButton}>OPEN</button>
         )}
         <ExportMenu c={c} />
+        {!sharedView && (
+          <button
+            onClick={() => setAccountOpen((v) => !v)}
+            style={{
+              ...headerButton,
+              ...(auth.user ? { background: theme.accent, color: theme.bg } : {}),
+            }}
+          >
+            {auth.user ? auth.user.email.split("@")[0]?.toUpperCase() ?? "ACCOUNT" : "SIGN IN"}
+          </button>
+        )}
         <input
           ref={fileInputRef}
           type="file"
@@ -353,6 +368,14 @@ export function App() {
           }}
         />
       </header>
+
+      {accountOpen && !sharedView && (
+        <AccountPanel
+          auth={auth}
+          onLibraryChanged={() => void refresh()}
+          onClose={() => setAccountOpen(false)}
+        />
+      )}
 
       {shareUrl && (
         <div
