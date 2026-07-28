@@ -144,10 +144,13 @@ export function useAlphaTab() {
     apiRef.current?.tex(tex);
   }, []);
 
-  const loadFile = useCallback(async (file: File) => {
-    const buffer = await file.arrayBuffer();
+  const loadBytes = useCallback((buffer: ArrayBuffer) => {
     apiRef.current?.load(new Uint8Array(buffer));
   }, []);
+
+  const loadFile = useCallback(async (file: File) => {
+    loadBytes(await file.arrayBuffer());
+  }, [loadBytes]);
 
   const playPause = useCallback(() => apiRef.current?.playPause(), []);
   const stop = useCallback(() => apiRef.current?.stop(), []);
@@ -225,8 +228,14 @@ export function useAlphaTab() {
     setTracks((prev) => prev.map((t) => (t.index === index ? { ...t, volume } : t)));
   }, []);
 
+  /** Live alphaTab handles, for callers that need the model (export, library). */
+  const getApi = useCallback(() => apiRef.current, []);
+  const getScore = useCallback(() => apiRef.current?.score ?? null, []);
+
   return {
     hostRef,
+    getApi,
+    getScore,
     ready,
     rendering,
     playing,
@@ -242,6 +251,7 @@ export function useAlphaTab() {
     ramp,
     error,
     loadTex,
+    loadBytes,
     loadFile,
     playPause,
     stop,

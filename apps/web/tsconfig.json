@@ -2,6 +2,9 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "noEmit": true,
+    // Apps emit no .d.ts, and declaration emit chokes on alphaTab's private
+    // class members leaking through inferred hook return types.
+    "declaration": false,
     "jsx": "react-jsx",
     "types": ["vite/client", "node"]
   },
