@@ -22,6 +22,12 @@ export interface LibraryEntry {
   bytes: ArrayBuffer | null;
   /** Populated for alphaTex sources. */
   tex: string | null;
+  /**
+   * JSON of the semantic Score for documents authored in CubScore. Its
+   * presence is what makes an entry re-editable rather than play-only:
+   * imported files have no core model until the Phase 2 importer lands.
+   */
+  core: string | null;
   fileName: string | null;
   addedAt: number;
   openedAt: number;

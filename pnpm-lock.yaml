@@ -17,6 +17,9 @@ importers:
       '@coderline/alphatab':
         specifier: ^1.8.0
         version: 1.8.4
+      '@cubscore/core':
+        specifier: workspace:*
+        version: link:../../packages/core
       react:
         specifier: ^18.3.0
         version: 18.3.1

@@ -18,8 +18,13 @@ export interface OpMeta {
   at: number;
 }
 
-export type Op = OpMeta &
-  (
+/**
+ * The edit itself, without log metadata. Kept separate so callers can build
+ * an edit without inventing an id/author, and so `Omit` never has to be
+ * applied to the union (which would collapse the discriminant).
+ */
+export type OpKind =
+
     | { type: "score.setTitle"; title: string }
     | { type: "score.setArtist"; artist: string }
     | { type: "track.insert"; index: number; track: Track }
@@ -30,13 +35,15 @@ export type Op = OpMeta &
     | { type: "beat.insert"; voiceId: Id; index: number; beat: Beat }
     | { type: "beat.remove"; voiceId: Id; beatId: Id }
     | { type: "beat.setDuration"; beatId: Id; duration: Duration }
+    | { type: "beat.setDots"; beatId: Id; dots: 0 | 1 | 2 }
     | { type: "note.insert"; beatId: Id; note: Note }
     | { type: "note.remove"; noteId: Id }
     | { type: "note.setPitch"; noteId: Id; pitch: number }
     | { type: "note.setFingering"; noteId: Id; string: number; fret: number }
     | { type: "note.addArticulation"; noteId: Id; articulation: Articulation }
-    | { type: "note.removeArticulation"; noteId: Id; articulation: Articulation }
-  );
+    | { type: "note.removeArticulation"; noteId: Id; articulation: Articulation };
+
+export type Op = OpMeta & OpKind;
 
 /** An applied batch: one user gesture, one undo step. */
 export interface OpBatch {

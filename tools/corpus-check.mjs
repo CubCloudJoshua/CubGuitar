@@ -83,6 +83,15 @@ async function main() {
 
     const results = [];
 
+    // The semantic model's serializer must produce alphaTex that parses.
+    lastDiagnostics = "";
+    const core = await page.evaluate(() => window.cubscore.checkCore());
+    results.push({ name: "packages/core serializer", diagnostics: lastDiagnostics, ...core });
+    if (!core.ok) {
+      console.log("\n--- generated alphaTex ---");
+      console.log(core.tex);
+    }
+
     for (const file of fixtures) {
       const tex = await readFile(file, "utf8");
       lastDiagnostics = "";
