@@ -9,10 +9,18 @@ export const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatValue: 4 };
 
 let counter = 0;
 
-/** Ids only need to be unique within a document; the sync layer will prefix by client. */
+// A per-session tag keeps ids from colliding with ones minted in an earlier
+// session: a document saved with n1..n50 and reopened later must not see a
+// fresh counter hand out n1 again, because ops address entities by id and a
+// duplicate would make one op hit two notes. The CRDT sync layer will replace
+// this with proper client ids.
+const SESSION_TAG = Math.floor(Math.random() * 36 ** 4)
+  .toString(36)
+  .padStart(4, "0");
+
 export function nextId(prefix: string): Id {
   counter += 1;
-  return `${prefix}${counter.toString(36)}`;
+  return `${prefix}${SESSION_TAG}${counter.toString(36)}`;
 }
 
 export function duration(denominator: number): Duration {

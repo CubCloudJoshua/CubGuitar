@@ -36,11 +36,21 @@ function op(kind: OpKind): Op {
   return { id: nextId("o"), author: AUTHOR, at: 0, ...kind };
 }
 
+/** Score plus undo stacks, updated atomically so they can never disagree. */
+interface EditorState {
+  score: Score;
+  past: Score[];
+  future: Score[];
+}
+
 export function useEditor() {
-  const [score, setScore] = useState<Score>(() => createScore("New Score"));
+  const [state, setState] = useState<EditorState>(() => ({
+    score: createScore("New Score"),
+    past: [],
+    future: [],
+  }));
+  const { score, past, future } = state;
   const [cursor, setCursor] = useState<Cursor>({ track: 0, bar: 0, beat: 0, string: 1 });
-  const [past, setPast] = useState<Score[]>([]);
-  const [future, setFuture] = useState<Score[]>([]);
   /** The op log. Undo uses snapshots today; the log is what sync will replay. */
   const logRef = useRef<OpBatch[]>([]);
   const digitRef = useRef<{ value: number; at: number } | null>(null);
@@ -50,43 +60,40 @@ export function useEditor() {
   const voice = bar?.voices[0];
   const beat: Beat | undefined = voice?.beats[cursor.beat];
 
-  const commit = useCallback(
-    (ops: Op[], label: string) => {
-      if (ops.length === 0) return;
-      const batch: OpBatch = { id: nextId("k"), ops, label };
-      setScore((prev) => {
-        const next = applyBatch(prev, batch);
-        if (next === prev) return prev;
-        setPast((p) => [...p, prev]);
-        setFuture([]);
-        logRef.current.push(batch);
-        return next;
-      });
-    },
-    [],
-  );
+  const commit = useCallback((ops: Op[], label: string) => {
+    if (ops.length === 0) return;
+    const batch: OpBatch = { id: nextId("k"), ops, label };
+    setState((prev) => {
+      const nextScore = applyBatch(prev.score, batch);
+      if (nextScore === prev.score) return prev;
+      // React StrictMode invokes updaters twice in development; the id check
+      // keeps the log from recording the batch twice.
+      if (logRef.current.at(-1)?.id !== batch.id) logRef.current.push(batch);
+      return { score: nextScore, past: [...prev.past, prev.score], future: [] };
+    });
+  }, []);
 
   const undo = useCallback(() => {
-    setPast((p) => {
-      const previous = p[p.length - 1];
-      if (!previous) return p;
-      setScore((current) => {
-        setFuture((f) => [current, ...f]);
-        return previous;
-      });
-      return p.slice(0, -1);
+    setState((prev) => {
+      const previous = prev.past[prev.past.length - 1];
+      if (!previous) return prev;
+      return {
+        score: previous,
+        past: prev.past.slice(0, -1),
+        future: [prev.score, ...prev.future],
+      };
     });
   }, []);
 
   const redo = useCallback(() => {
-    setFuture((f) => {
-      const next = f[0];
-      if (!next) return f;
-      setScore((current) => {
-        setPast((p) => [...p, current]);
-        return next;
-      });
-      return f.slice(1);
+    setState((prev) => {
+      const next = prev.future[0];
+      if (!next) return prev;
+      return {
+        score: next,
+        past: [...prev.past, prev.score],
+        future: prev.future.slice(1),
+      };
     });
   }, []);
 
@@ -224,18 +231,14 @@ export function useEditor() {
   const newScore = useCallback((title = "New Score") => {
     digitRef.current = null;
     logRef.current = [];
-    setPast([]);
-    setFuture([]);
-    setScore(createScore(title));
+    setState({ score: createScore(title), past: [], future: [] });
     setCursor({ track: 0, bar: 0, beat: 0, string: 1 });
   }, []);
 
   const loadScore = useCallback((next: Score) => {
     digitRef.current = null;
     logRef.current = [];
-    setPast([]);
-    setFuture([]);
-    setScore(next);
+    setState({ score: next, past: [], future: [] });
     setCursor({ track: 0, bar: 0, beat: 0, string: 1 });
   }, []);
 
