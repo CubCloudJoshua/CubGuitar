@@ -11,11 +11,12 @@ Phase 1 mostly done, Phase 2 started. Working today:
 - **Editor** — fret entry on a semantic score model with a full operation log. Type `0`-`9` for frets (two digits combine into 10-24 the way Guitar Pro does), arrows to move the caret, `+`/`-` for beats, `Enter` for a bar, `Ctrl+Z`/`Ctrl+Shift+Z` for undo and redo, plus durations, dots, and articulations. Work autosaves to the library and reopens in the editor.
 - **Player** — multitrack notation and tablature rendering with playback, click-to-seek, drag-to-select loop regions, speed trainer (presets, slider, and a ramp mode that raises speed after each loop pass), metronome, count-in, zoom, and a per-track mixer with mute, solo, and volume.
 - **Library** — local-first score library on IndexedDB. Import, search, open, delete; survives reload. This is the offline layer the desktop shell needs, and the cloud library will sync on top of it rather than replace it.
+- **Share links** — SHARE uploads the current score to the API and returns a link. The recipient gets a read-only player with the full practice toolbar (seek, loop, speed trainer, mixer) and no library or editing, nothing to install. Links are unguessable capability URLs until accounts land.
 - **Import** — Guitar Pro (`.gp`, `.gp3`, `.gp4`, `.gp5`, `.gpx`), MusicXML, CapXML, alphaTex, by file picker or drag-and-drop.
 - **Export** — Guitar Pro `.gp`, alphaTex, MIDI, and print/PDF.
 - **Responsive** — full controls down to phone width.
 
-Not built yet: accounts and cloud sync, real-time collaboration, and all AI features.
+Not built yet: accounts (share links exist, but nothing is owned or listable yet), cloud sync of the library, real-time collaboration, and all AI features.
 
 Imported Guitar Pro files are editable: an import is converted to the semantic model, and pressing EDIT opens it with a report of anything the model could not carry. Percussion is the notable gap — drum tracks play faithfully in the player but are dropped from the editable version rather than converted into notation that would be wrong. Multiple voices per bar, alternate endings, chord diagrams, and detailed bend curves are reported the same way.
 
@@ -32,6 +33,7 @@ The semantic score model in `packages/core` is the source of truth for authored 
 - `packages/core` — semantic score model, operation log, op application, and the alphaTex serializer
 - `packages/formats` — alphaTab-model-to-core import, with a report of what the model cannot carry
 - `apps/web` — the React app
+- `services/api` — share-link API (Fastify). Storage is behind an interface; the dev driver writes to `services/api/data/`, production swaps in Postgres + object storage without touching routes
 - `fixtures/` — original alphaTex scores, committed, run in CI
 - `corpus/` — real Guitar Pro files for import testing, gitignored (see `corpus/README.md`)
 - `tools/corpus-check.mjs` — the Phase 0 exit test
@@ -40,7 +42,8 @@ The semantic score model in `packages/core` is the source of truth for authored 
 
 ```sh
 pnpm install
-pnpm dev        # start the web app
+pnpm api        # start the share-link API on :8787
+pnpm dev        # start the web app (proxies /api to :8787)
 pnpm build      # typecheck and build everything
 pnpm corpus     # load and render every score in fixtures/ and corpus/
 ```

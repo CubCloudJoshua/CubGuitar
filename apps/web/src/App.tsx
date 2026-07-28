@@ -11,6 +11,7 @@ import { TrackMixer } from "./components/TrackMixer";
 import { ExportMenu } from "./components/ExportMenu";
 import { LibraryPanel } from "./library/LibraryPanel";
 import { deleteEntry, listEntries, newId, putEntry, type LibraryEntry } from "./library/db";
+import { base64ToBytes, fetchShared, shareEntry, sharedIdFromLocation } from "./share";
 import { DEMO_SCORE } from "./demo";
 
 type Mode = "play" | "edit";
@@ -41,12 +42,32 @@ export function App() {
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [importNotice, setImportNotice] = useState<ImportReport | null>(null);
+  /** Opened via a share link: read-only, no library. */
+  const [sharedView] = useState(() => sharedIdFromLocation() !== null);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
     setEntries(await listEntries());
   }, []);
 
   useEffect(() => {
+    // A share link bypasses the library entirely: load the shared score,
+    // read-only, and nothing else.
+    const sharedId = sharedIdFromLocation();
+    if (sharedId) {
+      void (async () => {
+        try {
+          const payload = await fetchShared(sharedId);
+          if (payload.tex !== null) loadTex(payload.tex);
+          else if (payload.bytesB64) loadBytes(base64ToBytes(payload.bytesB64));
+        } catch (err) {
+          setShareError(err instanceof Error ? err.message : String(err));
+        }
+      })();
+      return;
+    }
     void (async () => {
       const existing = await listEntries();
       if (existing.length === 0) {
@@ -153,6 +174,27 @@ export function App() {
     return () => clearTimeout(timer);
   }, [mode, editorScore, editorTex, refresh]);
 
+  const shareCurrent = useCallback(async () => {
+    const entry = entries.find((e) => e.id === currentId);
+    if (!entry) return;
+    setShareBusy(true);
+    setShareError(null);
+    try {
+      const url = await shareEntry(entry);
+      setShareUrl(url);
+      // Best effort; headless browsers and strict permissions may refuse.
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch {
+        /* the visible link covers this */
+      }
+    } catch (err) {
+      setShareError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setShareBusy(false);
+    }
+  }, [entries, currentId]);
+
   /** Converts the open imported score into an editable document. */
   const editImported = useCallback(() => {
     const entry = entries.find((e) => e.id === currentId);
@@ -228,9 +270,10 @@ export function App() {
     [currentId, refresh],
   );
 
-  const showLibrary = !narrow || libraryOpen;
-  const editing = mode === "edit";
-  const canEditCurrent = entries.some((e) => e.id === currentId && e.core !== null);
+  const showLibrary = !sharedView && (!narrow || libraryOpen);
+  const editing = !sharedView && mode === "edit";
+  const canEditCurrent = !sharedView && entries.some((e) => e.id === currentId && e.core !== null);
+  const canShare = !sharedView && entries.some((e) => e.id === currentId);
 
   return (
     <div
@@ -253,18 +296,35 @@ export function App() {
             <span style={{ color: theme.textDim }}> · {c.score.barCount} bars</span>
           </span>
         )}
+        {sharedView && (
+          <span
+            style={{
+              fontFamily: theme.mono, fontSize: 11, color: theme.bg, background: theme.accent,
+              padding: "3px 8px", letterSpacing: 0.5,
+            }}
+          >
+            SHARED SCORE
+          </span>
+        )}
         <span style={{ flex: 1 }} />
-        {narrow && (
+        {!sharedView && narrow && (
           <button onClick={() => setLibraryOpen((v) => !v)} style={headerButton}>LIBRARY</button>
         )}
-        <button onClick={startNewScore} style={headerButton}>NEW</button>
+        {!sharedView && <button onClick={startNewScore} style={headerButton}>NEW</button>}
         {!editing && canEditCurrent && (
           <button onClick={editImported} style={headerButton}>EDIT</button>
         )}
         {editing && (
           <button onClick={() => setMode("play")} style={headerButton}>PLAYER</button>
         )}
-        <button onClick={() => fileInputRef.current?.click()} style={headerButton}>OPEN</button>
+        {canShare && (
+          <button onClick={() => void shareCurrent()} style={headerButton} disabled={shareBusy}>
+            {shareBusy ? "SHARING…" : "SHARE"}
+          </button>
+        )}
+        {!sharedView && (
+          <button onClick={() => fileInputRef.current?.click()} style={headerButton}>OPEN</button>
+        )}
         <ExportMenu c={c} />
         <input
           ref={fileInputRef}
@@ -278,6 +338,52 @@ export function App() {
           }}
         />
       </header>
+
+      {shareUrl && (
+        <div
+          style={{
+            display: "flex", alignItems: "center", gap: 8,
+            background: theme.panel, border: `1px solid ${theme.accent}`,
+            padding: 10, marginBottom: 10,
+          }}
+        >
+          <span style={{ fontFamily: theme.mono, fontSize: 11, color: theme.accent }}>LINK</span>
+          <input
+            readOnly
+            value={shareUrl}
+            aria-label="Share link"
+            onFocus={(e) => e.target.select()}
+            style={{
+              flex: 1, minWidth: 0, fontFamily: theme.mono, fontSize: 12,
+              padding: "6px 8px", background: theme.bg,
+              border: `1px solid ${theme.border}`, color: theme.text,
+            }}
+          />
+          <button
+            onClick={() => void navigator.clipboard.writeText(shareUrl).catch(() => undefined)}
+            style={headerButton}
+          >
+            COPY
+          </button>
+          <button
+            onClick={() => setShareUrl(null)}
+            style={{ ...headerButton, borderColor: theme.border, color: theme.textDim }}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      {shareError && (
+        <div
+          style={{
+            background: "#2a1010", border: "1px solid #7a2020", color: "#ffb0b0",
+            fontFamily: theme.mono, fontSize: 12, padding: 10, marginBottom: 10,
+          }}
+        >
+          {shareError}
+        </div>
+      )}
 
       {editing && <EditorBar e={editor} enabled={editing} />}
 
@@ -375,9 +481,11 @@ export function App() {
       </div>
 
       <p style={{ fontFamily: theme.mono, fontSize: 11, color: theme.textDim, lineHeight: 1.7 }}>
-        {editing
-          ? "Editing. Type 0-9 to enter frets on the highlighted string, arrows to move, +/− to add or remove beats, Enter for a new bar, Ctrl+Z to undo. Work autosaves to the library."
-          : "Drop a .gp3/.gp4/.gp5/.gpx/.gp file anywhere to import it. Click a note to seek. Drag across the score to select a loop region, then press LOOP. NEW starts an editable score."}
+        {sharedView
+          ? "Shared score. Click a note to seek, drag to select a loop region, use the speed trainer to practice. Nothing to install."
+          : editing
+            ? "Editing. Type 0-9 to enter frets on the highlighted string, arrows to move, +/− to add or remove beats, Enter for a new bar, Ctrl+Z to undo. Work autosaves to the library."
+            : "Drop a .gp3/.gp4/.gp5/.gpx/.gp file anywhere to import it. Click a note to seek. Drag across the score to select a loop region, then press LOOP. NEW starts an editable score."}
       </p>
     </div>
   );

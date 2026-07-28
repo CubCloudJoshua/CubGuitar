@@ -7,6 +7,7 @@
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "dev": "pnpm --filter @cubscore/web dev",
+    "api": "pnpm --filter @cubscore/api dev",
     "corpus": "node tools/corpus-check.mjs"
   },
   "engines": {
