@@ -179,6 +179,15 @@ export function useEditor() {
   const typeDigit = useCallback(
     (digit: number) => {
       if (!beat || !track) return;
+      // Fret entry needs strings. On a staff that has none — an imported piano
+      // or vocal part, which the importer carries pitch-exact — pitchAt has no
+      // tuning to work from and answers middle C for every digit, and the note
+      // carries a string number the existing notes do not, so nothing is
+      // replaced. Every keystroke therefore appended a stray middle C to the
+      // user's imported part, and autosave wrote it down. Such a staff is
+      // read-only in this editor until it grows note entry of its own: Delete
+      // already cannot find notes there either, because it matches on string.
+      if (track.instrument.kind !== "fretted") return;
       const now = performance.now();
       const pending = digitRef.current;
       let fret = digit;
@@ -413,6 +422,8 @@ export function useEditor() {
     cursorTick,
     beatDurationTicks,
     currentBeat: beat,
+    /** False on a staff with no strings, where fret entry does not apply. */
+    canEnterFrets: track?.instrument.kind === "fretted",
     canUndo: past.length > 0,
     canRedo: future.length > 0,
     opCount: logRef.current.length,

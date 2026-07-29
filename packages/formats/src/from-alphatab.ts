@@ -194,7 +194,13 @@ function instrumentOf(track: alphaTab.model.Track, staff: alphaTab.model.Staff, 
       capo: staff.capo,
     };
   }
-  ctx.unsupported.add(`pitched staff on "${track.name}" (no tablature)`);
+  // Deliberately not reported as unsupported. A pitched staff — a piano or
+  // vocal part — is carried pitch-exact and round-trips exactly; the report is
+  // specifically what the conversion could not carry, and the banner tells the
+  // user those things are "absent from the editable version", which would be a
+  // lie here. What is true is that this editor's fret entry does not apply to a
+  // staff with no strings, so it is read-only; that is an editor limitation, the
+  // same category as extra voices above, and the editor says so itself.
   return { kind: "pitched", midiProgram: track.playbackInfo.program };
 }
 

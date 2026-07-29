@@ -25,6 +25,8 @@ Imported Guitar Pro files are editable, and editing one never costs you the file
 
 An import is converted to the semantic model, and pressing EDIT opens it with a report of anything the model could not carry. Multiple voices per bar and ties survive the conversion and round-trip exactly. Percussion is the notable gap — drum tracks play faithfully in the player but are dropped from the editable version rather than converted into notation that would be wrong. Alternate endings, chord diagrams, section markers, and detailed bend curves are reported the same way.
 
+Staves with no strings — a piano or vocal part — are carried pitch-exact and are not reported as lost, because they are not. They are read-only in the editor: fret entry needs a tuning to turn a digit into a pitch, and there is none, so the editor refuses rather than inventing notes. `fixtures/09-pitched-staff.altex` guards the round trip and `e2e/suites/pitched-staff.mjs` guards the refusal.
+
 The op log is replayed for real now: a live session's whole history is what a late joiner is handed, and `packages/core/src/session.ts` rebuilds the document from it on every acknowledgement. Undo is still document snapshots rather than inverse operations, which is why it is disabled during a live session — collaborative undo needs inverse ops broadcast to the room, and that has not been built.
 
 Rendering and playback come from [alphaTab](https://github.com/CoderLine/alphaTab); PLAN.md Phase 2 replaces it with our own engine. Its license needs a legal check before launch.
