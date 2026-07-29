@@ -180,6 +180,45 @@ export async function run({ browser, baseUrl, recorder }) {
     (await page.locator(".at-surface svg").count()) > 0,
   );
 
+  // Reduced motion. index.html neutralises CSS transitions, but a page turn is a
+  // scrollBy with an explicit behaviour, which overrides scroll-behaviour and so
+  // escapes that rule entirely — the preference has to be read in JS.
+  //
+  // Measured by counting intermediate positions across animation frames rather
+  // than by how fast the turn finishes: a short smooth scroll completes inside
+  // any timeout loose enough not to be flaky, so a "did it land yet" check
+  // passes whether or not the preference is honoured. It was written that way
+  // first and passed with the handling deleted.
+  const turnSamples = () =>
+    page.evaluate(async () => {
+      const el = Array.from(document.querySelectorAll("main *")).find(
+        (e) => getComputedStyle(e).overflowY === "auto" && e.scrollHeight > e.clientHeight + 4,
+      );
+      if (!el) return [];
+      el.scrollTop = 0;
+      await new Promise((r) => setTimeout(r, 250));
+      const button = Array.from(document.querySelectorAll("button")).find(
+        (b) => b.getAttribute("aria-label") === "Next page",
+      );
+      button?.click();
+      const seen = [];
+      for (let i = 0; i < 24; i += 1) {
+        seen.push(Math.round(el.scrollTop));
+        await new Promise((r) => requestAnimationFrame(() => r(undefined)));
+      }
+      return seen;
+    });
+
+  const animated = new Set(await turnSamples()).size;
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await settle(400);
+  const instant = new Set(await turnSamples()).size;
+  await page.emulateMedia({ reducedMotion: null });
+  await settle(400);
+
+  recorder.check("a page turn animates by default", animated > 3, `${animated} distinct positions`);
+  recorder.equal("under reduced motion it lands in one step", instant, 1);
+
   // Escape leaves, and everything it changed is put back.
   await page.keyboard.press("Escape");
   await settle(2500);
