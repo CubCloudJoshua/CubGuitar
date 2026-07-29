@@ -13,7 +13,8 @@ import { ExportMenu } from "./components/ExportMenu";
 import { LibraryPanel } from "./library/LibraryPanel";
 import { AccountPanel } from "./auth/AccountPanel";
 import { ErrorBanner, ImportNoticeBanner, ShareLinkBar } from "./components/Banners";
-import { Button, buttonStyle, color, Drawer, font, motion, TextField, typeScale } from "@cubscore/design";
+import { useCommands } from "./commands";
+import { Button, buttonStyle, color, CommandPalette, Drawer, font, motion, TextField, typeScale } from "@cubscore/design";
 
 const headerButton = buttonStyle("outline");
 
@@ -33,6 +34,7 @@ export function App() {
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
 
   // Opened via a collab link: join the room and land in the editor. Guests
   // do not autosave (no library entry); the host's autosave owns the doc.
@@ -45,10 +47,15 @@ export function App() {
     setMode("edit");
   }, [join, setMode]);
 
-  // Space toggles playback; Cmd/Ctrl+L toggles the library drawer.
+  // Space toggles playback; Cmd/Ctrl+L the library; Cmd/Ctrl+K the palette.
   const { playPause } = c;
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") {
+        ev.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
       if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "l") {
         ev.preventDefault();
         setLibraryOpen((v) => !v);
@@ -69,6 +76,19 @@ export function App() {
   const canEditCurrent = !shared.active && currentEntry?.core != null;
   const canShare = !shared.active && currentEntry !== undefined;
   const error = shared.loadError ?? shareLink.error;
+
+  const commands = useCommands({
+    c,
+    editor,
+    lib,
+    collab,
+    sharedView: shared.active,
+    editing,
+    canShare,
+    shareCurrent: () => void shareLink.share(currentEntry),
+    openFilePicker: () => fileInputRef.current?.click(),
+    toggleAccount: () => setAccountOpen((v) => !v),
+  });
   // Playback dims the chrome so the score carries the screen; editing keeps
   // its tools at full strength since play-along editing is a real workflow.
   const chromeOpacity = c.playing && !editing ? 0.35 : 1;
@@ -280,10 +300,10 @@ export function App() {
         }}
       >
         {shared.active
-          ? "Shared score. Click a note to seek, drag to select a loop region, use the speed trainer to practice. Nothing to install."
+          ? "Shared score. Click a note to seek, drag to select a loop region, use the speed trainer to practice. Nothing to install. Cmd+K for every command."
           : editing
-            ? "Editing. Type 0-9 to enter frets on the highlighted string, arrows to move, +/− to add or remove beats, Enter for a new bar, Ctrl+Z to undo. Work autosaves to the library."
-            : "Drop a .gp3/.gp4/.gp5/.gpx/.gp file anywhere to import it. Click a note to seek. Drag across the score to select a loop region, then press LOOP. NEW starts an editable score."}
+            ? "Editing. Type 0-9 to enter frets on the highlighted string, arrows to move, +/− to add or remove beats, Enter for a new bar, Ctrl+Z to undo. Cmd+K for every command. Work autosaves to the library."
+            : "Drop a .gp3/.gp4/.gp5/.gpx/.gp file anywhere to import it. Click a note to seek. Drag to select a loop region, then press LOOP. NEW starts an editable score. Cmd+K for every command."}
       </p>
 
       {!shared.active && (
@@ -299,6 +319,11 @@ export function App() {
       )}
 
       <TransportPill c={c} />
+      {/* Mounted fresh on each open: guarantees an empty query and focused
+          input regardless of how the previous invocation ended. */}
+      {paletteOpen && (
+        <CommandPalette open onClose={() => setPaletteOpen(false)} commands={commands} />
+      )}
     </div>
   );
 }
