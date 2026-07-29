@@ -6,7 +6,7 @@
  * object storage on CubCloud infra) implements the same interface; nothing
  * above this file changes.
  */
-import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
 import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 
@@ -84,11 +84,19 @@ export interface CloudEntry {
   updatedAt: number;
 }
 
+/** What one account is currently taking up. */
+export interface Usage {
+  entries: number;
+  bytes: number;
+}
+
 export interface LibraryStore {
   put(entry: CloudEntry): Promise<void>;
   get(ownerId: string, id: string): Promise<CloudEntry | undefined>;
   list(ownerId: string): Promise<CloudEntry[]>;
   delete(ownerId: string, id: string): Promise<void>;
+  /** Measured from file sizes, so it costs no reads and no parsing. */
+  usage(ownerId: string): Promise<Usage>;
 }
 
 /** Unguessable id: share links are capability URLs until accounts land. */
@@ -364,5 +372,35 @@ export class FileLibraryStore implements LibraryStore {
 
   delete(ownerId: string, id: string): Promise<void> {
     return this.dirFor(ownerId).delete(id);
+  }
+
+  /**
+   * Counts and measures an account's entries without reading any of them.
+   *
+   * Nothing bounded how much one account could store: 600 writes an hour at 24
+   * MB each, and registration is free, so filling the disk cost an attacker
+   * nothing and every real user's autosave and sync then failed with ENOSPC.
+   * Sizes come from stat rather than from the records, so a large library costs
+   * one syscall per entry instead of parsing megabytes of base64.
+   */
+  async usage(ownerId: string): Promise<Usage> {
+    assertSafeId(ownerId);
+    const dir = path.join(this.dir, ownerId);
+    let names: string[];
+    try {
+      names = (await readdir(dir)).filter((n) => n.endsWith(".json"));
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "ENOENT") return { entries: 0, bytes: 0 };
+      throw e;
+    }
+    let bytes = 0;
+    for (const name of names) {
+      try {
+        bytes += (await stat(path.join(dir, name))).size;
+      } catch {
+        // Removed between the listing and the stat; it is not taking up space.
+      }
+    }
+    return { entries: names.length, bytes };
   }
 }

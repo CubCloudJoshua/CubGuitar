@@ -249,4 +249,42 @@ describe("FileLibraryStore", () => {
     expect(await library.get("owner-a", "same-id")).toBeUndefined();
     expect(await library.get("owner-b", "same-id")).toBeDefined();
   });
+
+  it("measures an account's usage without reading its records", async () => {
+    const library = new FileLibraryStore(path.join(dir, "library"));
+    const entry = (id: string, tex: string) => ({
+      id,
+      ownerId: "owner-a",
+      title: id,
+      artist: "",
+      format: "altex" as const,
+      tex,
+      bytesB64: null,
+      core: null,
+      report: null,
+      authored: true,
+      tracks: 1,
+      bars: 1,
+      addedAt: 1,
+      updatedAt: 1,
+    });
+
+    expect(await library.usage("owner-a")).toEqual({ entries: 0, bytes: 0 });
+    await library.put(entry("one", "x".repeat(500)));
+    await library.put(entry("two", "y".repeat(500)));
+    await library.put({ ...entry("theirs", "z"), ownerId: "owner-b" });
+
+    const used = await library.usage("owner-a");
+    expect(used.entries).toBe(2);
+    // Each record is at least its own tex, and this account is not charged for
+    // the other one's.
+    expect(used.bytes).toBeGreaterThan(1000);
+    expect((await library.usage("owner-b")).entries).toBe(1);
+
+    await library.delete("owner-a", "one");
+    expect((await library.usage("owner-a")).entries).toBe(1);
+    // A temp file left by an interrupted write is not counted as an entry.
+    await writeFile(path.join(dir, "library", "owner-a", "junk.json.aaaa.tmp"), "x".repeat(9000));
+    expect((await library.usage("owner-a")).entries).toBe(1);
+  });
 });

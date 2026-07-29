@@ -9,14 +9,25 @@ export const DEFAULT_TIME_SIGNATURE: TimeSignature = { beats: 4, beatValue: 4 };
 
 let counter = 0;
 
-// A per-session tag keeps ids from colliding with ones minted in an earlier
-// session: a document saved with n1..n50 and reopened later must not see a
-// fresh counter hand out n1 again, because ops address entities by id and a
-// duplicate would make one op hit two notes. The CRDT sync layer will replace
-// this with proper client ids.
-const SESSION_TAG = Math.floor(Math.random() * 36 ** 4)
-  .toString(36)
-  .padStart(4, "0");
+/**
+ * A per-session tag, so ids never collide with ones minted elsewhere.
+ *
+ * Two things depend on it. A document saved with n1..n50 and reopened later
+ * must not see a fresh counter hand out n1 again, and two people in a live
+ * session must not mint the same id for different notes — ops address entities
+ * by id, so a duplicate makes one op hit two things and the document is
+ * corrupt from then on.
+ *
+ * Ten base-36 characters is about 52 bits, drawn from the crypto RNG rather
+ * than Math.random. The previous four characters was 20 bits, which is a
+ * coin-flip collision at around a thousand concurrent sessions and a real one
+ * long before that; the width costs nothing. The CRDT sync layer will replace
+ * this with proper client ids.
+ */
+const SESSION_TAG = Array.from(crypto.getRandomValues(new Uint8Array(7)))
+  .map((byte) => byte.toString(36).padStart(2, "0"))
+  .join("")
+  .slice(0, 10);
 
 export function nextId(prefix: string): Id {
   counter += 1;

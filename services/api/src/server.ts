@@ -35,6 +35,17 @@ const MAX_BODY = 24 * 1024 * 1024;
 const MAX_TEX = 2 * 1024 * 1024;
 const MAX_CORE = 8 * 1024 * 1024;
 const MAX_TEXT_FIELD = 500;
+/**
+ * Per-account cloud library limits.
+ *
+ * Nothing bounded this: 600 writes an hour at up to 24 MB each, and an account
+ * costs nothing to create, so filling the disk was free and every real user's
+ * autosave and sync then failed with ENOSPC. Generous for a real library —
+ * transcriptions are tens of kilobytes and Guitar Pro files rarely reach one
+ * megabyte — and it will move behind the production store's own quota.
+ */
+const MAX_ENTRIES_PER_OWNER = 2000;
+const MAX_BYTES_PER_OWNER = 2 * 1024 * 1024 * 1024;
 const COOKIE_NAME = "cub_session";
 const COOKIE_MAX_AGE = 30 * 24 * 60 * 60;
 
@@ -252,6 +263,19 @@ app.put<{ Params: { id: string } }>("/api/library/:id", async (request, reply) =
   }
   if (bytesB64 !== null && !/^[A-Za-z0-9+/=]*$/.test(bytesB64)) {
     return reply.status(400).send({ error: "bytesB64 is not base64" });
+  }
+
+  // Quota, checked against what is already stored. Overwriting an entry that
+  // exists is always allowed, so a user at their limit can still save the score
+  // they are working on — only growing the library is refused.
+  const existing = await library.get(user.id, request.params.id);
+  if (!existing) {
+    const used = await library.usage(user.id);
+    if (used.entries >= MAX_ENTRIES_PER_OWNER || used.bytes >= MAX_BYTES_PER_OWNER) {
+      return reply.status(413).send({
+        error: "library is full — remove some scores to add more",
+      });
+    }
   }
 
   const entry: CloudEntry = {
