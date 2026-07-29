@@ -1,6 +1,6 @@
 # CubScore Product Plan
 
-**Name: CubScore** (decided July 2026; repo predates the decision and keeps the CubScore slug for now). Instrument-first but multi-instrument, so the name leaves room beyond guitar. Trademark search before launch.
+**Name: CubScore** (decided July 2026; repo predates the decision and keeps the CubGuitar slug for now). Instrument-first but multi-instrument, so the name leaves room beyond guitar. Trademark search before launch.
 
 **The tab editor the market should have built ten years ago.**
 
