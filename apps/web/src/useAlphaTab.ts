@@ -257,17 +257,12 @@ export function useAlphaTab() {
     api.timePosition = Math.max(0, end > 0 ? Math.min(next, end - 1) : next);
   }, []);
 
-  /**
-   * Tells alphaTab which element to scroll to follow playback. Perform mode
-   * puts the score in its own scroller, and without this the beat cursor walks
-   * off the bottom while the page stays put. Passing null restores the default.
-   */
-  const setScrollElement = useCallback((element: HTMLElement | null) => {
-    const api = apiRef.current;
-    if (!api) return;
-    api.settings.player.scrollElement = element ?? "html,body";
-    api.updateSettings();
-  }, []);
+  // There is deliberately no setScrollElement here. alphaTab resolves a scroll
+  // container the first time it needs one and caches it for the renderer's
+  // lifetime with nothing to invalidate it, so assigning
+  // settings.player.scrollElement afterwards is accepted and then ignored —
+  // it appeared to work or not depending on whether anything had scrolled yet.
+  // Perform mode follows the playhead itself; see perform/PerformMode.tsx.
 
   /**
    * Swaps the engraving palette. Perform mode is read from across a room under
@@ -351,7 +346,6 @@ export function useAlphaTab() {
     toggleCountIn,
     setZoom,
     setStageEngraving,
-    setScrollElement,
     seekSeconds,
     seekFraction,
     setRamp,

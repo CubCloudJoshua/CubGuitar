@@ -149,11 +149,11 @@ export function App() {
 
   usePerformShell({
     active: performing,
+    playing: c.playing,
     scroller,
     onExit: () => setPerforming(false),
     seekSeconds: c.seekSeconds,
     setStageEngraving: c.setStageEngraving,
-    setScrollElement: c.setScrollElement,
     zoom: c.zoom,
     setZoom: c.setZoom,
   });

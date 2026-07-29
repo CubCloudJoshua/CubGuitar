@@ -244,22 +244,27 @@ export { TapZone };
 /** How much larger the notation is on stage than at a desk. */
 const STAGE_ZOOM = 1.4;
 
+/** Where the playing bar should sit: high, because a player reads ahead of it. */
+const FOLLOW_TARGET = 0.28;
+/** How far it may drift before a turn, as a share of the frame. */
+const FOLLOW_SLACK = 0.18;
+
 export function usePerformShell({
   active,
+  playing,
   scroller,
   onExit,
   seekSeconds,
   setStageEngraving,
-  setScrollElement,
   zoom,
   setZoom,
 }: {
   active: boolean;
+  playing: boolean;
   scroller: HTMLElement | null;
   onExit: () => void;
   seekSeconds: (delta: number) => void;
   setStageEngraving: (on: boolean) => void;
-  setScrollElement: (element: HTMLElement | null) => void;
   zoom: number;
   setZoom: (value: number) => void;
 }) {
@@ -296,13 +301,47 @@ export function usePerformShell({
     };
   }, [active]);
 
-  // The score gets its own scroller here, and alphaTab has to follow playback
-  // in it rather than in the window.
+  /**
+   * Follows the playhead.
+   *
+   * alphaTab's own following cannot be pointed at this scroller. It resolves a
+   * scroll container the first time it needs one and caches it for the life of
+   * the renderer (alphaTab 1.8.4, HtmlElementContainer.getScrollContainer),
+   * with nothing to invalidate it — so assigning settings.player.scrollElement
+   * afterwards is accepted and ignored, and whether it appears to work depends
+   * on whether anything has scrolled yet. In Perform the score has its own
+   * scroller, so the cursor simply walked off the bottom of the screen while
+   * the page stayed put: on a two-minute score the performer saw the first
+   * eight bars and then nothing.
+   *
+   * Following it here also puts the playing bar high in the frame rather than
+   * centred, which is what someone reading ahead of the beat actually wants.
+   */
   useEffect(() => {
-    if (!active || !scroller) return;
-    setScrollElement(scroller);
-    return () => setScrollElement(null);
-  }, [active, scroller, setScrollElement]);
+    if (!active || !playing || !scroller) return;
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    let quietUntil = 0;
+    const timer = setInterval(() => {
+      // The bar highlight, not the beat line: keeping the whole playing bar in
+      // view is what stops a player losing their place.
+      const cursor = document.querySelector(".at-cursor-bar");
+      if (!cursor) return;
+      const now = performance.now();
+      // A smooth scroll takes time to land, and every tick in between would
+      // read the old position and queue another one.
+      if (now < quietUntil) return;
+      const box = cursor.getBoundingClientRect();
+      const view = scroller.getBoundingClientRect();
+      if (view.height <= 0) return;
+      const drift = box.top - (view.top + view.height * FOLLOW_TARGET);
+      // Dead band: a cursor already comfortably placed is left alone rather
+      // than nudged on every tick.
+      if (Math.abs(drift) < view.height * FOLLOW_SLACK) return;
+      quietUntil = now + (still ? 0 : 600);
+      scroller.scrollBy({ top: drift, behavior: still ? "auto" : "smooth" });
+    }, 150);
+    return () => clearInterval(timer);
+  }, [active, playing, scroller]);
 
   const page = useCallback((direction: 1 | -1) => turnPage(scroller, direction), [scroller]);
 

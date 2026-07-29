@@ -106,9 +106,37 @@ export async function run({ browser, baseUrl, recorder }) {
   await page.getByRole("button", { name: "NEW", exact: true }).click();
   await settle(1200);
   await page.keyboard.press("Digit5");
-  await settle(2500);
+  // Long enough to wrap onto several staff systems. Following the playhead is
+  // vertical, so a score that fits on one line has nothing to follow and would
+  // let a broken implementation pass.
+  for (let i = 0; i < 16; i += 1) {
+    await page.keyboard.press("Enter");
+    await page.waitForTimeout(70);
+  }
+  await settle(3000);
   await page.getByRole("button", { name: "PERFORM", exact: true }).click();
-  await settle(2500);
+  await settle(3000);
+
+  // Following the playhead, with nobody touching anything. alphaTab cannot be
+  // pointed at this scroller — it caches the container it first resolved and
+  // ignores later assignments — so this is the app's own following. Without it a
+  // performer saw the first system and then watched the cursor leave the screen.
+  const beforePlay = await scrollState(page);
+  recorder.check(
+    "a wrapped score has somewhere to scroll",
+    ((beforePlay?.scrollHeight ?? 0) - (beforePlay?.height ?? 0)) > 400,
+    JSON.stringify(beforePlay),
+  );
+  await page.getByRole("button", { name: "Play", exact: true }).click();
+  await settle(9000);
+  const whilePlaying = await scrollState(page);
+  recorder.check(
+    "playback scrolls the score without being asked",
+    (whilePlaying?.top ?? 0) > 0,
+    `scrollTop ${whilePlaying?.top} of ${(whilePlaying?.scrollHeight ?? 0) - (whilePlaying?.height ?? 0)}`,
+  );
+  await page.getByRole("button", { name: "Stop" }).click();
+  await settle(1500);
   const authored = page.locator('[aria-label^="Play New Score"]').first();
   recorder.check("an authored score is offered in the setlist", (await authored.count()) === 1);
   await authored.click();
