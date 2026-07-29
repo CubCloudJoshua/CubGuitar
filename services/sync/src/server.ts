@@ -3,10 +3,14 @@
  *
  * One room per collab session. The host seeds a score snapshot; every edit
  * arrives as a serialized op batch, gets a server-assigned sequence number,
- * and is broadcast to the other members. Convergence comes from ordering
- * plus the op design: application is deterministic and ops addressing a
- * missing id are no-ops, so concurrent deletes and edits resolve instead of
- * conflicting.
+ * and is broadcast to every member including the one who sent it.
+ *
+ * That echo is the whole convergence story. This order is the document's
+ * order: clients hold their own edits as provisional until they come back
+ * with a place in the sequence, so every client applies the same batches in
+ * the same order and arrives at the same document. The op design does the
+ * rest — application is deterministic and ops addressing a missing id are
+ * no-ops, so concurrent deletes and edits resolve instead of conflicting.
  *
  * Deliberate v1 limits, all documented in README: rooms live in memory (a
  * restart ends live sessions), there is no offline merge (that is the CRDT
@@ -109,7 +113,17 @@ server.on("connection", (socket, request) => {
         if (!message.batch) return;
         if (room.batches.length >= MAX_BATCHES) return;
         room.batches.push(message.batch);
-        broadcast(room, socket, { type: "batch", batch: message.batch, from: member.id });
+        // Echoed to the sender as well, which is what makes the order here the
+        // order everywhere. A client cannot know where its own edit landed in
+        // the sequence until it is told, so it holds the edit as provisional
+        // and replays it over confirmed state until this arrives. Without the
+        // echo, two people editing at once kept two different documents.
+        broadcast(room, null, {
+          type: "batch",
+          batch: message.batch,
+          from: member.id,
+          seq: room.batches.length,
+        });
         break;
 
       case "cursor":

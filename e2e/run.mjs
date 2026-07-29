@@ -12,6 +12,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
+import net from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -32,9 +33,54 @@ const children = [];
 let dataDir;
 
 function start(command, args, options) {
-  const child = spawn(command, args, { stdio: "ignore", ...options });
+  // Own process group. pnpm spawns a shell which spawns tsx or vite, and
+  // signalling only the direct child leaves those grandchildren holding the
+  // ports after this process exits.
+  const child = spawn(command, args, { stdio: "ignore", detached: true, ...options });
   children.push(child);
   return child;
+}
+
+function portInUse(port) {
+  return new Promise((resolve) => {
+    const socket = net.createConnection({ host: "127.0.0.1", port });
+    const done = (answer) => {
+      socket.destroy();
+      resolve(answer);
+    };
+    socket.setTimeout(1500);
+    socket.on("connect", () => done(true));
+    socket.on("timeout", () => done(false));
+    socket.on("error", () => done(false));
+  });
+}
+
+/**
+ * Refuse to run against someone else's services.
+ *
+ * The services used to be started blind: if a port was already taken the new
+ * process failed to bind and the suites talked to whatever was already there.
+ * A leftover server from an earlier run then quietly tested stale code — which
+ * cost real debugging time, because a correct fix looked broken.
+ */
+async function requireFreePorts() {
+  const named = [
+    [API_PORT, "API", "E2E_API_PORT"],
+    [SYNC_PORT, "sync", "E2E_SYNC_PORT"],
+    [WEB_PORT, "web", "E2E_WEB_PORT"],
+  ];
+  const taken = [];
+  for (const [port, what, envVar] of named) {
+    if (await portInUse(port)) taken.push(`  :${port} (${what}) — override with ${envVar}`);
+  }
+  if (taken.length > 0) {
+    console.error(
+      `refusing to start: something is already listening on ${taken.length === 1 ? "a port" : "ports"} the ` +
+        `suites need.\n${taken.join("\n")}\n` +
+        "Stop the other process, or set the environment variables above to free ports.",
+    );
+    process.exit(2);
+  }
 }
 
 async function waitFor(check, what, timeoutMs = 60_000) {
@@ -56,9 +102,15 @@ const ok = (url) => fetch(url).then((r) => r.ok, () => false);
 async function cleanup() {
   for (const child of children) {
     try {
-      child.kill("SIGTERM");
+      // Negative pid signals the whole group, which is what actually stops the
+      // tsx and vite processes pnpm started on our behalf.
+      if (child.pid) process.kill(-child.pid, "SIGTERM");
     } catch {
-      // already gone
+      try {
+        child.kill("SIGTERM");
+      } catch {
+        // already gone
+      }
     }
   }
   if (dataDir) await rm(dataDir, { recursive: true, force: true }).catch(() => undefined);
@@ -104,6 +156,7 @@ async function main() {
     process.exit(2);
   }
 
+  await requireFreePorts();
   dataDir = await mkdtemp(path.join(tmpdir(), "cubscore-e2e-"));
 
   start("pnpm", ["dev"], {

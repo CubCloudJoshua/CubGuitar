@@ -58,6 +58,52 @@ export async function run({ browser, baseUrl, recorder }) {
   recorder.check("guest holds both concurrent edits", guestTab.includes("3") && guestTab.includes("5"));
   recorder.check("documents are identical", hostTab === guestTab);
 
+  // The hard case: both edit the *same* note at the same instant. Disjoint
+  // edits commute, so they converged even before the server ordered them;
+  // conflicting ones only converge because both clients wait to be told where
+  // their own edit landed. Fired without awaiting in between so the two
+  // messages are genuinely in flight together.
+  // Both carets back to the first beat of the first string, the beat that
+  // already holds a note, so the two inserts land on the same target.
+  for (let i = 0; i < 6; i += 1) {
+    await host.page.keyboard.press("ArrowLeft");
+    await guest.page.keyboard.press("ArrowLeft");
+  }
+  await host.page.waitForTimeout(600);
+  recorder.check(
+    "both carets are on the same beat before the conflict",
+    (await host.page.locator("text=/bar 1 · beat 1 · string 1/").count()) === 1 &&
+      (await guest.page.locator("text=/bar 1 · beat 1 · string 1/").count()) === 1,
+  );
+  await Promise.all([host.page.keyboard.press("Digit4"), guest.page.keyboard.press("Digit6")]);
+  await host.page.waitForTimeout(2500);
+  const hostConflict = await scoreText(host.page);
+  const guestConflict = await scoreText(guest.page);
+  recorder.check(
+    "a conflicting simultaneous edit resolves the same way on both",
+    hostConflict === guestConflict,
+    `host=${hostConflict.slice(0, 70)} guest=${guestConflict.slice(0, 70)}`,
+  );
+  // Which fret won is the server's business; that one of them did is not.
+  recorder.check(
+    "the conflicting edit landed at all",
+    /[46]/.test(hostConflict),
+    hostConflict.slice(0, 70),
+  );
+
+  // A joiner replaying the server's log must land on that same document.
+  const latecomer = await newDevice(browser, recorder, "latecomer");
+  await latecomer.page.goto(url, { waitUntil: "networkidle" });
+  await appReady(latecomer.page);
+  await latecomer.page.waitForTimeout(2500);
+  recorder.check(
+    "a late joiner replays into the same document",
+    (await scoreText(latecomer.page)) === hostConflict,
+    (await scoreText(latecomer.page)).slice(0, 60),
+  );
+  await latecomer.page.close();
+  await host.page.waitForTimeout(1200);
+
   // Undo is disabled while live: local snapshot undo would fork the document.
   const beforeUndo = await scoreText(host.page);
   await host.page.keyboard.press("Control+z");

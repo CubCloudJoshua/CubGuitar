@@ -10,8 +10,8 @@ Phase 1 mostly done, Phase 2 started. Working today:
 
 - **Editor** — fret entry on a semantic score model with a full operation log. Type `0`-`9` for frets (two digits combine into 10-24 the way Guitar Pro does), arrows to move the caret, `+`/`-` for beats, `Enter` for a bar, `Ctrl+Z`/`Ctrl+Shift+Z` for undo and redo, plus durations, dots, and articulations. Work autosaves to the library and reopens in the editor.
 - **Player** — multitrack notation and tablature rendering with playback, click-to-seek, drag-to-select loop regions, speed trainer (presets, slider, and a ramp mode that raises speed after each loop pass), metronome, count-in, zoom, and a per-track mixer with mute, solo, and volume.
-- **Library** — local-first score library on IndexedDB. Import, search, open, delete; survives reload. This is the offline layer the desktop shell needs, and the cloud library will sync on top of it rather than replace it.
-- **Realtime collaboration** — COLLAB in the editor opens a live session; anyone with the link joins and edits the same score simultaneously, with presence (who is at which bar and beat) in the session banner. Every edit streams as an op batch through `services/sync`, which orders and broadcasts them; ordering plus no-op-on-missing-id op semantics gives convergence. v1 limits, on purpose: rooms are in-memory (a restart ends live sessions), guests do not autosave (the host's copy owns the document), undo is disabled while live (snapshot undo would silently fork the document; collaborative undo needs broadcast inverse ops), and there is no offline merge yet — that is the CRDT work this protocol grows into.
+- **Library** — local-first score library on IndexedDB. Import, search, open, delete; survives reload. This is the offline layer the desktop shell needs, and the cloud library will sync on top of it rather than replace it. Entries belong to an account, so two people sharing a browser profile do not see or sync each other's scores; work done while signed out is adopted by the first account to sign in rather than lost.
+- **Realtime collaboration** — COLLAB in the editor opens a live session; anyone with the link joins and edits the same score simultaneously, with presence (who is at which bar and beat) in the session banner. Every edit streams as an op batch through `services/sync`, which orders them and echoes them to everyone including the sender. That echo is the convergence story: a client shows its own edit right away but treats it as provisional until the room says where it landed, so the document is always (server-confirmed state) + (our unacknowledged batches). Without it, each client applied its own edit first and everyone else's second, and two people who edited the same note at the same moment kept two different documents forever. v1 limits, on purpose: rooms are in-memory (a restart ends live sessions), guests do not autosave (the host's copy owns the document), undo is disabled while live (snapshot undo would silently fork the document; collaborative undo needs broadcast inverse ops), and there is no offline merge yet — that is the CRDT work this protocol grows into.
 - **Accounts and cloud library** — email/password accounts (scrypt, HttpOnly session cookies, no external auth service). SYNC LIBRARY pushes every local score to the cloud and pulls down ones this device is missing; policy is local-wins, cloud as backup and transfer, until CRDT sync lands. No email verification yet.
 - **Share links** — SHARE uploads the current score to the API and returns a link. The recipient gets a read-only player with the full practice toolbar (seek, loop, speed trainer, mixer) and no library or editing, nothing to install. Shares created while signed in are owned: they appear in the account panel and can be revoked, which kills the link. Anonymous shares still work but cannot be revoked.
 - **Import** — Guitar Pro (`.gp`, `.gp3`, `.gp4`, `.gp5`, `.gpx`), MusicXML, CapXML, alphaTex, by file picker or drag-and-drop.
@@ -20,7 +20,9 @@ Phase 1 mostly done, Phase 2 started. Working today:
 
 Not built yet: offline collaboration merge (CRDT), collaborative undo, email verification and password reset, and all AI features.
 
-Imported Guitar Pro files are editable: an import is converted to the semantic model, and pressing EDIT opens it with a report of anything the model could not carry. Multiple voices per bar and ties survive the conversion and round-trip exactly. Percussion is the notable gap — drum tracks play faithfully in the player but are dropped from the editable version rather than converted into notation that would be wrong. Alternate endings, chord diagrams, section markers, and detailed bend curves are reported the same way.
+Imported Guitar Pro files are editable, and editing one never costs you the file. The library row keeps the original bytes, filename, and import report untouched — autosave only ever writes the fields the editor owns — so an import carries both the original and your working edit. "Show imported original" in the palette switches which one opening shows; EDIT resumes the edit.
+
+An import is converted to the semantic model, and pressing EDIT opens it with a report of anything the model could not carry. Multiple voices per bar and ties survive the conversion and round-trip exactly. Percussion is the notable gap — drum tracks play faithfully in the player but are dropped from the editable version rather than converted into notation that would be wrong. Alternate endings, chord diagrams, section markers, and detailed bend curves are reported the same way.
 
 Undo uses document snapshots rather than inverse operations; the op log is recorded but not yet replayed, which is the work that lands with sync.
 
@@ -36,8 +38,8 @@ The semantic score model in `packages/core` is the source of truth for authored 
 - `packages/formats` — alphaTab-model-to-core import, with a report of what the model cannot carry
 - `packages/design` — design tokens (UI-DESIGN.md) and the UI primitives every component is built from
 - `apps/web` — the React app
-- `services/api` — accounts, cloud library, and share links (Fastify, node:crypto scrypt, no auth dependencies). Storage is behind interfaces; the dev drivers write JSON to `services/api/data/`, production swaps in Postgres + object storage without touching routes
-- `services/sync` — realtime collaboration rooms over WebSocket (`ws`), ordering and broadcasting op batches
+- `services/api` — accounts, cloud library, and share links (Fastify, node:crypto scrypt, no auth dependencies). Storage is behind interfaces; the dev drivers write JSON to `services/api/data/`, production swaps in Postgres + object storage without touching routes. Records are written by rename so a crash cannot leave a fragment, and an unreadable record is contained to itself rather than failing every login
+- `services/sync` — realtime collaboration rooms over WebSocket (`ws`), assigning the order that every client's document follows
 - `fixtures/` — original alphaTex scores, committed, run in CI
 - `corpus/` — real Guitar Pro files for import testing, gitignored (see `corpus/README.md`)
 - `e2e/` — browser-driven journey suites and their runner
@@ -51,9 +53,9 @@ pnpm api        # start the accounts/library/share API on :8787
 pnpm sync       # start the realtime collaboration service on :8788
 pnpm dev        # start the web app (proxies /api and /ws)
 pnpm build      # typecheck and build everything
-pnpm test       # unit tests (packages/core)
+pnpm test       # unit tests (packages/core, services/api)
 pnpm corpus     # load and render every score in fixtures/ and corpus/
-pnpm e2e        # drive the built app in a browser across six journeys
+pnpm e2e        # drive the built app in a browser across nine journeys
 ```
 
 CI runs build, unit tests, the corpus suite (including import round-trip pitch
@@ -62,9 +64,11 @@ fidelity), and the end-to-end suites on every push.
 `pnpm e2e` needs `pnpm build` first. It stands up the API and sync services on
 isolated ports against a throwaway data directory, so it never touches a running
 dev stack or its data, then drives the real app in headless Chromium: editing,
-track and meter changes, the command palette, share-and-save, two-browser
-realtime collaboration, and accounts with cross-device sync and revocation. Pass
-suite names to run a subset (`pnpm e2e collab accounts`). Every UI regression in
+track and meter changes, the command palette, phone-width layout, whether an
+imported file survives being edited, share-and-save, two-browser realtime
+collaboration including a conflicting simultaneous edit, accounts with
+cross-device sync and revocation, and two people sharing one browser profile.
+Pass suite names to run a subset (`pnpm e2e collab accounts`). Every UI regression in
 this project so far was caught here rather than by unit tests — focus races,
 double-committed operations, a semantic element lost in a refactor — which is why
 these journeys are version-controlled and gated in CI rather than kept as

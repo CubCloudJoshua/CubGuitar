@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   applyBatch,
+  beginSession,
   beatTicks,
   createBar,
   createNote,
@@ -9,8 +10,11 @@ import {
   createTrack,
   duration,
   frettedGuitar,
+  localCommit,
   nextId,
   pitchAt,
+  serverBatch,
+  sessionView,
   STANDARD_BASS,
   tickAt,
   toAlphaTex,
@@ -20,6 +24,7 @@ import {
   type OpBatch,
   type OpKind,
   type Score,
+  type Session,
 } from "@cubscore/core";
 
 export interface Cursor {
@@ -44,6 +49,13 @@ interface EditorState {
   score: Score;
   past: Score[];
   future: Score[];
+  /**
+   * Non-null while a live session owns ordering, in which case `score` is a
+   * projection of it rather than the document itself. The rule and its
+   * reasoning live in @cubscore/core/session, where they are tested against a
+   * model of the sync server.
+   */
+  live: Session | null;
 }
 
 export function useEditor() {
@@ -51,6 +63,7 @@ export function useEditor() {
     score: createScore("New Score"),
     past: [],
     future: [],
+    live: null,
   }));
   const { score, past, future } = state;
   const [cursor, setCursor] = useState<Cursor>({ track: 0, bar: 0, beat: 0, string: 1 });
@@ -72,20 +85,33 @@ export function useEditor() {
     // double-send under StrictMode. An ineffective batch no-ops remotely too.
     commitListenerRef.current?.(batch);
     setState((prev) => {
-      const nextScore = applyBatch(prev.score, batch);
-      if (nextScore === prev.score) return prev;
       // React StrictMode invokes updaters twice in development; the id check
       // keeps the log from recording the batch twice.
-      if (logRef.current.at(-1)?.id !== batch.id) logRef.current.push(batch);
-      return { score: nextScore, past: [...prev.past, prev.score], future: [] };
+      const record = () => {
+        if (logRef.current.at(-1)?.id !== batch.id) logRef.current.push(batch);
+      };
+      if (prev.live) {
+        const live = localCommit(prev.live, batch);
+        record();
+        // No undo history in a live session: a snapshot of a document the
+        // group has moved past is not something anyone can safely go back to.
+        return { score: sessionView(live), past: [], future: [], live };
+      }
+      const nextScore = applyBatch(prev.score, batch);
+      if (nextScore === prev.score) return prev;
+      record();
+      return { ...prev, score: nextScore, past: [...prev.past, prev.score], future: [] };
     });
   }, []);
 
+  // Both stacks stay empty in a live session, so these are no-ops there rather
+  // than a way to move the document out from under the server's ordering.
   const undo = useCallback(() => {
     setState((prev) => {
       const previous = prev.past[prev.past.length - 1];
       if (!previous) return prev;
       return {
+        ...prev,
         score: previous,
         past: prev.past.slice(0, -1),
         future: [prev.score, ...prev.future],
@@ -98,6 +124,7 @@ export function useEditor() {
       const next = prev.future[0];
       if (!next) return prev;
       return {
+        ...prev,
         score: next,
         past: [...prev.past, prev.score],
         future: prev.future.slice(1),
@@ -106,20 +133,41 @@ export function useEditor() {
   }, []);
 
   /**
-   * Applies a batch from a collaborator, and drops local history when it lands.
+   * Applies a batch the server has ordered, from anyone including this client.
    *
-   * A snapshot taken before someone else's edit no longer describes any
-   * document the group shares, so restoring it would erase their work. History
-   * gated only on "is the socket live" was worse than useless: the moment a
-   * session ended or the connection dropped, one Ctrl+Z reinstated a pre-collab
-   * snapshot and autosaved it over everything the session produced. Undo
-   * resumes from edits made after the remote batch.
+   * Local history is dropped either way. A snapshot taken before someone else's
+   * edit no longer describes any document the group shares, so restoring it
+   * would erase their work. History gated only on "is the socket live" was
+   * worse than useless: the moment a session ended or the connection dropped,
+   * one Ctrl+Z reinstated a pre-collab snapshot and autosaved it over
+   * everything the session produced.
    */
   const applyRemote = useCallback((batch: OpBatch) => {
     setState((prev) => {
-      const nextScore = applyBatch(prev.score, batch);
-      if (nextScore === prev.score) return prev;
-      return { score: nextScore, past: [], future: [] };
+      if (!prev.live) {
+        const nextScore = applyBatch(prev.score, batch);
+        if (nextScore === prev.score) return prev;
+        return { ...prev, score: nextScore, past: [], future: [] };
+      }
+      // Advance server truth, retire our copy of this batch if it was ours,
+      // and rebuild the view. Everything still pending replays on top.
+      const live = serverBatch(prev.live, batch);
+      return { score: sessionView(live), past: [], future: [], live };
+    });
+  }, []);
+
+  /**
+   * Hands ordering to the server, or takes it back when the session ends.
+   * Called from the socket's open and close handlers rather than an effect, so
+   * a message that arrives in the same tick as the connection cannot be
+   * applied under the wrong ordering rule.
+   */
+  const setLiveOrdering = useCallback((on: boolean) => {
+    setState((prev) => {
+      if (on === (prev.live !== null)) return prev;
+      // Whatever is on screen when a session starts is the base everyone
+      // builds on; when it ends, the projection is simply the document.
+      return on ? { ...prev, live: beginSession(prev.score) } : { ...prev, live: null };
     });
   }, []);
 
@@ -326,19 +374,29 @@ export function useEditor() {
     [score],
   );
 
-  const newScore = useCallback((title = "New Score") => {
+  /**
+   * Replaces the document. In a live session this also resets server truth:
+   * the snapshot a joiner is handed *is* the confirmed state, and anything
+   * pending against the old document has no meaning against the new one.
+   */
+  const replaceDocument = useCallback((next: Score) => {
     digitRef.current = null;
     logRef.current = [];
-    setState({ score: createScore(title), past: [], future: [] });
+    setState((prev) => ({
+      score: next,
+      past: [],
+      future: [],
+      live: prev.live ? beginSession(next) : null,
+    }));
     setCursor({ track: 0, bar: 0, beat: 0, string: 1 });
   }, []);
 
-  const loadScore = useCallback((next: Score) => {
-    digitRef.current = null;
-    logRef.current = [];
-    setState({ score: next, past: [], future: [] });
-    setCursor({ track: 0, bar: 0, beat: 0, string: 1 });
-  }, []);
+  const newScore = useCallback(
+    (title = "New Score") => replaceDocument(createScore(title)),
+    [replaceDocument],
+  );
+
+  const loadScore = replaceDocument;
 
   const tex = useMemo(() => toAlphaTex(score), [score]);
   const cursorTick = useMemo(
@@ -379,6 +437,7 @@ export function useEditor() {
     undo,
     redo,
     applyRemote,
+    setLiveOrdering,
     setCommitListener,
     newScore,
     loadScore,

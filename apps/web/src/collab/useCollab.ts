@@ -51,11 +51,20 @@ export function useCollab(editor: EditorController, displayName: string) {
   const [cursors, setCursors] = useState<Map<string, PeerCursor>>(new Map());
   const [error, setError] = useState<string | null>(null);
 
-  const { applyRemote, setCommitListener, loadScore } = editor;
+  const { applyRemote, setCommitListener, setLiveOrdering, loadScore } = editor;
 
   const connect = useCallback(
     (roomId: string, seedScore: CoreScore | null) => {
-      socketRef.current?.close();
+      // Detach the old socket before closing it. Its close event fires later,
+      // and if that lands after the new socket opens, its handler would hand
+      // ordering back mid-session and unsubscribe a live room.
+      const previous = socketRef.current;
+      if (previous) {
+        previous.onclose = null;
+        previous.onmessage = null;
+        previous.onerror = null;
+        previous.close();
+      }
       setStatus("connecting");
       setError(null);
 
@@ -66,6 +75,11 @@ export function useCollab(editor: EditorController, displayName: string) {
       socketRef.current = socket;
 
       socket.onopen = () => {
+        // Before anything can arrive: from here the server decides the order in
+        // which edits apply, and local edits are provisional until it says
+        // where they landed. Done here rather than in an effect so a batch that
+        // arrives in the same tick cannot be applied under the old rule.
+        setLiveOrdering(true);
         if (seedScore) socket.send(JSON.stringify({ type: "init", score: seedScore }));
         setStatus("live");
         setUrl(`${location.origin}${location.pathname}#c=${roomId}`);
@@ -111,12 +125,16 @@ export function useCollab(editor: EditorController, displayName: string) {
         setError("collaboration connection failed");
       };
       socket.onclose = () => {
+        // Ordering comes home. Anything still pending stays in the document:
+        // the connection dropped, and losing the user's last few edits would
+        // be a worse answer than keeping work the room never saw.
+        setLiveOrdering(false);
         setStatus((s) => (s === "error" ? s : "off"));
         setPeers([]);
         setCursors(new Map());
       };
     },
-    [displayName, loadScore, applyRemote],
+    [displayName, loadScore, applyRemote, setLiveOrdering],
   );
 
   /** Host: open a room seeded with the score being edited. */
@@ -130,9 +148,10 @@ export function useCollab(editor: EditorController, displayName: string) {
   const stop = useCallback(() => {
     socketRef.current?.close();
     socketRef.current = null;
+    setLiveOrdering(false);
     setStatus("off");
     setUrl(null);
-  }, []);
+  }, [setLiveOrdering]);
 
   // Stream local commits into the room while live.
   useEffect(() => {

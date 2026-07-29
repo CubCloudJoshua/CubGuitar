@@ -150,7 +150,9 @@ Every edit is an operation in a log. That single choice gives us undo, autosave,
 
 **Status, July 2026.** Phase 0 complete: the corpus harness enforces pitch-exact import fidelity across eight original fixtures and real Guitar Pro transcriptions (Led Zeppelin .gp3 files, 270+ bars, 8k+ notes), including alternate tunings, capos, 32nd runs, and 5:4 tuplets. Phase 1 functionally complete: player, local-first library, accounts, cloud library sync, revocable share links with save-to-library for recipients, exports (.gp/alphaTex/MIDI/print), verified function at phone width. Landed early from Phase 2: the op-log editor on the semantic model, .gp export, and editable imports. Landed early from Phase 4: realtime collaboration with presence and verified convergence.
 
-Quality gates in CI on every push: unit tests including the convergence contract the collaboration feature rests on, the corpus fidelity suite, and seven browser-driven end-to-end journeys. See UI-DESIGN.md for the interface overhaul's phase status.
+Collaboration converges on the server's ordering rather than each client's own: a client holds its edits provisional until the room tells it where they landed, so two people editing the same note at the same moment reach the same document instead of two. That rule lives in `packages/core/src/session.ts` and is tested against a model of the sync server.
+
+Quality gates in CI on every push: unit tests covering the convergence contract, the session ordering the collaboration feature rests on, and the account store's failure modes; the corpus fidelity suite; and nine browser-driven end-to-end journeys, including whether an imported file survives being edited and whether two people sharing a browser can see each other's libraries. See UI-DESIGN.md for the interface overhaul's phase status.
 
 Billing rails, email verification, collaborative undo, offline CRDT merge, and every AI feature remain.
 
