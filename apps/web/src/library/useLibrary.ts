@@ -169,10 +169,9 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
    *    editor states cannot be merged yet, so this saves alongside their work
    *    instead of clobbering it.
    */
-  const flushSave = useCallback(async () => {
+  const writeNow = useCallback(async () => {
     const target = editorEntryRef.current;
     if (!target) return;
-    // Read synchronously: callers flush and then immediately change state.
     const { score, tex } = latestRef.current;
     if (tex === savedTexRef.current || savedTexRef.current === AWAIT_BASELINE) return;
 
@@ -216,6 +215,26 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     }
     await refresh();
   }, [refresh, setEditorTarget]);
+
+  /**
+   * Serializes writes. Two flushes in flight at once — the debounce timer firing
+   * just as the user clicks away, say — each read the row before the other wrote
+   * it, so the second saw the first's revision as a foreign writer and forked a
+   * duplicate copy of the score. Queued, the second one finds the document
+   * already saved and does nothing.
+   */
+  const savingRef = useRef<Promise<void>>(Promise.resolve());
+  const flushSave = useCallback((): Promise<void> => {
+    const attempt = () =>
+      writeNow().catch((err) => {
+        // A failed write must not break the chain, or every later save is
+        // skipped and the user loses everything after the first hiccup.
+        console.warn("autosave failed", err);
+      });
+    const next = savingRef.current.then(attempt, attempt);
+    savingRef.current = next;
+    return next;
+  }, [writeNow]);
 
   // Debounced autosave. The dirty comparison means entering the editor cannot
   // rewrite a row on its own, and the timer only coalesces keystrokes: exits
