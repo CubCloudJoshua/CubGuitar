@@ -51,6 +51,24 @@ export async function run({ browser, baseUrl, recorder }) {
   await page.getByRole("button", { name: "PAUSE" }).click();
   await page.waitForTimeout(400);
 
+  // The position bar is scrubbable, and its touch target is a target: the bar
+  // itself is 3px, which no thumb can hit.
+  const slider = page.getByRole("slider", { name: "Position" });
+  const sliderBox = await slider.boundingBox();
+  recorder.check("the position bar is on screen", sliderBox !== null);
+  recorder.check(
+    "the position bar is big enough to touch",
+    (sliderBox?.height ?? 0) >= 20,
+    `h=${Math.round(sliderBox?.height ?? 0)}`,
+  );
+  if (sliderBox) {
+    const before = Number((await slider.getAttribute("aria-valuenow")) ?? "0");
+    await page.mouse.click(sliderBox.x + sliderBox.width * 0.7, sliderBox.y + sliderBox.height / 2);
+    await page.waitForTimeout(1200);
+    const after = Number((await slider.getAttribute("aria-valuenow")) ?? "0");
+    recorder.check("tapping the position bar seeks", after > before, `${before}% -> ${after}%`);
+  }
+
   // The expanded practice controls must fit too: this is where a 560px panel
   // would silently overflow a 390px screen.
   await page.getByRole("button", { name: "More controls" }).click();

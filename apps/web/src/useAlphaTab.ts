@@ -238,6 +238,14 @@ export function useAlphaTab() {
     setZoomState(value);
   }, []);
 
+  /** Jumps to a fraction of the song, for scrubbing the transport. */
+  const seekFraction = useCallback((fraction: number) => {
+    const api = apiRef.current;
+    const end = endTimeRef.current;
+    if (!api || end <= 0) return;
+    api.timePosition = Math.max(0, Math.min(1, fraction)) * (end - 1);
+  }, []);
+
   /** Nudges playback, for the coarse seeking a player wants mid-song. */
   const seekSeconds = useCallback((delta: number) => {
     const api = apiRef.current;
@@ -345,6 +353,7 @@ export function useAlphaTab() {
     setStageEngraving,
     setScrollElement,
     seekSeconds,
+    seekFraction,
     setRamp,
     setTrackMuted,
     setTrackSolo,

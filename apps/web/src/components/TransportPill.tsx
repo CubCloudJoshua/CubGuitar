@@ -6,7 +6,7 @@
  * state stays quiet.
  */
 import { useState } from "react";
-import { Button, color, font, Label, Panel, typeScale, VDivider } from "@cubscore/design";
+import { Button, color, font, Label, motion, Panel, typeScale, VDivider } from "@cubscore/design";
 import type { AlphaTabController } from "../useAlphaTab";
 import { usePhone } from "../useNarrow";
 import { TrackRows } from "./TrackMixer";
@@ -21,11 +21,116 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/**
+ * Play, wearing the progress (UI-DESIGN.md, signature moment: "the transport
+ * pill contracts to a progress ring").
+ *
+ * The label stays as the accessible name rather than as text: the ring is the
+ * only round thing on the surface, so it needs no caption, but "Play" and
+ * "Pause" still have to be announced and still have to be findable.
+ */
+function PlayRing({
+  playing,
+  progress,
+  disabled,
+  compact,
+  onClick,
+}: {
+  playing: boolean;
+  progress: number;
+  disabled: boolean;
+  compact: boolean;
+  onClick: () => void;
+}) {
+  const size = compact ? 40 : 46;
+  const stroke = 3;
+  const radius = (size - stroke) / 2;
+  const circumference = 2 * Math.PI * radius;
+  const swept = circumference * Math.max(0, Math.min(1, progress));
+
+  return (
+    <button
+      onClick={onClick}
+      onMouseUp={(ev) => ev.currentTarget.blur()}
+      disabled={disabled}
+      aria-label={playing ? "PAUSE" : "PLAY"}
+      title={playing ? "Pause (Space)" : "Play (Space)"}
+      style={{
+        position: "relative",
+        width: size,
+        height: size,
+        flexShrink: 0,
+        padding: 0,
+        border: "none",
+        borderRadius: 999,
+        background: playing ? "transparent" : color.accent,
+        cursor: disabled ? "default" : "pointer",
+        opacity: disabled ? 0.4 : 1,
+        display: "grid",
+        placeItems: "center",
+        transition: `background ${motion.base}`,
+      }}
+    >
+      <svg
+        width={size}
+        height={size}
+        viewBox={`0 0 ${size} ${size}`}
+        style={{ position: "absolute", inset: 0, transform: "rotate(-90deg)" }}
+        aria-hidden="true"
+      >
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={playing ? color.hairline : "transparent"}
+          strokeWidth={stroke}
+        />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
+          fill="none"
+          stroke={color.accentLive}
+          strokeWidth={stroke}
+          strokeLinecap="round"
+          strokeDasharray={circumference}
+          strokeDashoffset={circumference - swept}
+          opacity={playing ? 1 : 0}
+          style={{ transition: `stroke-dashoffset ${motion.fast}, opacity ${motion.base}` }}
+        />
+      </svg>
+      <span
+        aria-hidden="true"
+        style={{
+          position: "relative",
+          fontSize: compact ? 13 : 15,
+          lineHeight: 1,
+          color: playing ? color.accentLive : color.bg,
+          letterSpacing: playing ? 1 : 0,
+          // The glyph is nudged right when it is a triangle, which is optically
+          // off-centre inside a circle if it is not.
+          paddingLeft: playing ? 0 : 2,
+        }}
+      >
+        {playing ? "❙❙" : "▶"}
+      </span>
+    </button>
+  );
+}
+
 export function TransportPill({ c }: { c: AlphaTabController }) {
   const [expanded, setExpanded] = useState(false);
   const phone = usePhone();
   const disabled = !c.ready;
   const progress = c.position.endTime > 0 ? c.position.currentTime / c.position.endTime : 0;
+
+  const { seekFraction } = c;
+  const scrubTo = (track: HTMLElement, clientX: number) => {
+    const box = track.getBoundingClientRect();
+    if (box.width <= 0) return;
+    seekFraction((clientX - box.left) / box.width);
+  };
 
   return (
     <div
@@ -141,14 +246,13 @@ export function TransportPill({ c }: { c: AlphaTabController }) {
           boxShadow: "0 8px 30px rgba(0,0,0,0.55)",
         }}
       >
-        <Button
-          variant="solid"
-          onClick={c.playPause}
+        <PlayRing
+          playing={c.playing}
+          progress={progress}
           disabled={disabled}
-          style={{ borderRadius: 999, minWidth: phone ? 62 : 74, flexShrink: 0 }}
-        >
-          {c.playing ? "PAUSE" : "PLAY"}
-        </Button>
+          compact={phone}
+          onClick={c.playPause}
+        />
         {!phone && (
           <Button size="sm" onClick={c.stop} disabled={disabled} style={{ borderRadius: 999 }}>
             STOP
@@ -167,24 +271,59 @@ export function TransportPill({ c }: { c: AlphaTabController }) {
           {formatTime(c.position.currentTime / 1000)} / {formatTime(c.position.endTime / 1000)}
         </span>
 
+        {/*
+          Scrubbable. It looked like a progress bar and had always been inert,
+          which is worse than not having one: the only way to move through a
+          song was to click a note in the score, which needs the right bar to be
+          on screen first.
+        */}
         <div
+          role="slider"
+          tabIndex={disabled ? -1 : 0}
+          aria-label="Position"
+          aria-valuemin={0}
+          aria-valuemax={100}
+          aria-valuenow={Math.round(progress * 100)}
+          aria-valuetext={`${formatTime(c.position.currentTime / 1000)} of ${formatTime(c.position.endTime / 1000)}`}
+          onPointerDown={(ev) => {
+            if (disabled) return;
+            ev.currentTarget.setPointerCapture(ev.pointerId);
+            scrubTo(ev.currentTarget, ev.clientX);
+          }}
+          onPointerMove={(ev) => {
+            // Only while dragging: buttons is 0 for a plain hover.
+            if (disabled || ev.buttons === 0) return;
+            scrubTo(ev.currentTarget, ev.clientX);
+          }}
+          onKeyDown={(ev) => {
+            if (disabled) return;
+            if (ev.key === "ArrowRight") c.seekSeconds(5);
+            else if (ev.key === "ArrowLeft") c.seekSeconds(-5);
+            else if (ev.key === "Home") c.seekFraction(0);
+            else return;
+            ev.preventDefault();
+          }}
           style={{
             width: phone ? undefined : 120,
             flex: phone ? "1 1 40px" : undefined,
             minWidth: 32,
-            height: 3,
-            background: color.border,
-            borderRadius: 2,
+            // A 3px bar is a 3px target. The padding makes it thumb-sized
+            // without making it look heavier.
+            padding: "9px 0",
+            cursor: disabled ? "default" : "pointer",
+            touchAction: "none",
           }}
         >
-          <div
-            style={{
-              width: `${Math.min(100, progress * 100)}%`,
-              height: "100%",
-              background: color.accentLive,
-              borderRadius: 2,
-            }}
-          />
+          <div style={{ height: 3, background: color.border, borderRadius: 2 }}>
+            <div
+              style={{
+                width: `${Math.min(100, progress * 100)}%`,
+                height: "100%",
+                background: color.accentLive,
+                borderRadius: 2,
+              }}
+            />
+          </div>
         </div>
 
         {!phone && (
