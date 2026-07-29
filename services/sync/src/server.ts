@@ -20,8 +20,19 @@
 import { WebSocketServer, WebSocket } from "ws";
 
 const PORT = Number(process.env.PORT ?? 8788);
+const HOST = process.env.HOST ?? "127.0.0.1";
 const MAX_MESSAGE = 4 * 1024 * 1024;
 const MAX_BATCHES = 50_000;
+/**
+ * A room's whole retained log, in bytes.
+ *
+ * The count cap alone bounded nothing that matters: 50,000 batches of 4 MB is
+ * 200 GB of retained memory, so one unauthenticated socket could exhaust the
+ * heap and, because rooms live in memory, end every live session on the host.
+ * Bytes are what the machine actually runs out of.
+ */
+const MAX_ROOM_BYTES = 16 * 1024 * 1024;
+const MAX_MEMBERS = 32;
 
 interface Member {
   socket: WebSocket;
@@ -34,7 +45,25 @@ interface Room {
   snapshot: unknown | null;
   /** Ordered op batches since the snapshot. */
   batches: unknown[];
+  /** Retained size of snapshot plus batches, to bound memory per room. */
+  bytes: number;
   members: Map<WebSocket, Member>;
+}
+
+/**
+ * Is this shaped like an op batch?
+ *
+ * Anyone holding a session link can send anything. `if (!message.batch)` let
+ * `{}`, `42` and `{"ops":null}` through, and applying one threw out of the React
+ * state updater on every member — blanking their tabs — and then crashed
+ * everyone who joined afterwards, because the server had stored what it
+ * broadcast. The room stayed dead until the process restarted. The client is
+ * hardened too; this stops the poison being retained in the first place.
+ */
+function isBatch(value: unknown): value is { id: string; ops: unknown[] } {
+  if (typeof value !== "object" || value === null) return false;
+  const candidate = value as { id?: unknown; ops?: unknown };
+  return typeof candidate.id === "string" && Array.isArray(candidate.ops);
 }
 
 const rooms = new Map<string, Room>();
@@ -43,7 +72,7 @@ let nextMemberId = 1;
 function roomFor(id: string): Room {
   let room = rooms.get(id);
   if (!room) {
-    room = { snapshot: null, batches: [], members: new Map() };
+    room = { snapshot: null, batches: [], bytes: 0, members: new Map() };
     rooms.set(id, room);
   }
   return room;
@@ -63,7 +92,10 @@ function peerList(room: Room): Array<{ id: string; name: string }> {
   return [...room.members.values()].map((m) => ({ id: m.id, name: m.name }));
 }
 
-const server = new WebSocketServer({ port: PORT, maxPayload: MAX_MESSAGE });
+// Bound to the loopback interface like the API, so the web app's proxy is the
+// only way in. It used to listen on every interface, which put an
+// unauthenticated service on the network.
+const server = new WebSocketServer({ port: PORT, host: HOST, maxPayload: MAX_MESSAGE });
 
 server.on("connection", (socket, request) => {
   const url = new URL(request.url ?? "/", "http://localhost");
@@ -74,6 +106,10 @@ server.on("connection", (socket, request) => {
   }
 
   const room = roomFor(roomId);
+  if (room.members.size >= MAX_MEMBERS) {
+    socket.close(4001, "this session is full");
+    return;
+  }
   const member: Member = {
     socket,
     id: `m${nextMemberId++}`,
@@ -100,19 +136,38 @@ server.on("connection", (socket, request) => {
     }
 
     switch (message.type) {
-      case "init":
-        // The host (or the first member with content) seeds the room.
-        if (room.snapshot === null && message.score) {
-          room.snapshot = message.score;
-          room.batches = [];
-          broadcast(room, socket, { type: "state", snapshot: room.snapshot, batches: [], peers: peerList(room) });
+      case "init": {
+        // The host, or whoever is present when a room has no snapshot: a room
+        // that lost its snapshot could otherwise never get one again, and
+        // everyone in it would edit their own document while the banner said
+        // LIVE. Only the unseeded case is open, so a guest cannot overwrite a
+        // live session with their own score.
+        if (room.snapshot !== null || !message.score) break;
+        const size = JSON.stringify(message.score).length;
+        if (size > MAX_ROOM_BYTES) {
+          send(socket, { type: "full", reason: "this score is too large to share live" });
+          break;
         }
+        room.snapshot = message.score;
+        room.batches = [];
+        room.bytes = size;
+        broadcast(room, socket, { type: "state", snapshot: room.snapshot, batches: [], peers: peerList(room) });
         break;
+      }
 
-      case "batch":
-        if (!message.batch) return;
-        if (room.batches.length >= MAX_BATCHES) return;
+      case "batch": {
+        if (!isBatch(message.batch)) return;
+        const size = JSON.stringify(message.batch).length;
+        if (room.batches.length >= MAX_BATCHES || room.bytes + size > MAX_ROOM_BYTES) {
+          // Say so. Returning silently meant the sender never got its echo, so
+          // it held the edit as provisional forever: it kept seeing its own
+          // work while nobody else ever did, the banner still said LIVE, and
+          // every later edit vanished the same way.
+          send(socket, { type: "full", reason: "this session has reached its size limit" });
+          return;
+        }
         room.batches.push(message.batch);
+        room.bytes += size;
         // Echoed to the sender as well, which is what makes the order here the
         // order everywhere. A client cannot know where its own edit landed in
         // the sequence until it is told, so it holds the edit as provisional
@@ -125,6 +180,7 @@ server.on("connection", (socket, request) => {
           seq: room.batches.length,
         });
         break;
+      }
 
       case "cursor":
         broadcast(room, socket, { type: "cursor", from: member.id, name: member.name, cursor: message.cursor });

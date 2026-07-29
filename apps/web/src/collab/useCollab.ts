@@ -23,7 +23,8 @@ export interface PeerCursor {
 }
 
 interface ServerMessage {
-  type: "state" | "batch" | "peers" | "cursor";
+  type: "state" | "batch" | "peers" | "cursor" | "full";
+  reason?: string;
   you?: string;
   snapshot?: unknown;
   batches?: unknown[];
@@ -53,8 +54,24 @@ export function useCollab(editor: EditorController, displayName: string) {
 
   const { applyRemote, setCommitListener, setLiveOrdering, loadScore } = editor;
 
+  /**
+   * The document, and the display name, read at the moment they are needed.
+   *
+   * Both used to be captured in `connect`'s closure, and `displayName` was in
+   * its dependency list. It is derived from the signed-in user, which resolves
+   * asynchronously after boot, so `connect` changed identity a few hundred
+   * milliseconds in — and the effect that joins a room from a #c= link re-ran
+   * and reconnected. Every signed-in person opening a collab link therefore
+   * dropped and remade their socket, which was enough to delete a room they
+   * were briefly alone in and lose its snapshot for good.
+   */
+  const scoreRef = useRef(editor.score);
+  scoreRef.current = editor.score;
+  const nameRef = useRef(displayName);
+  nameRef.current = displayName;
+
   const connect = useCallback(
-    (roomId: string, seedScore: CoreScore | null) => {
+    (roomId: string, seed: boolean) => {
       // Detach the old socket before closing it. Its close event fires later,
       // and if that lands after the new socket opens, its handler would hand
       // ordering back mid-session and unsubscribe a live room.
@@ -70,7 +87,7 @@ export function useCollab(editor: EditorController, displayName: string) {
 
       const proto = location.protocol === "https:" ? "wss" : "ws";
       const socket = new WebSocket(
-        `${proto}://${location.host}/ws?room=${roomId}&name=${encodeURIComponent(displayName)}`,
+        `${proto}://${location.host}/ws?room=${roomId}&name=${encodeURIComponent(nameRef.current)}`,
       );
       socketRef.current = socket;
 
@@ -80,7 +97,13 @@ export function useCollab(editor: EditorController, displayName: string) {
         // where they landed. Done here rather than in an effect so a batch that
         // arrives in the same tick cannot be applied under the old rule.
         setLiveOrdering(true);
-        if (seedScore) socket.send(JSON.stringify({ type: "init", score: seedScore }));
+        // Seeded from the document as it is now, not as it was when the button
+        // was pressed. The handshake takes time, and edits made during it went
+        // into the host's own state without reaching the room — every guest was
+        // then permanently missing them, with no batch that would ever carry
+        // them, because the commit listener only attaches once the session is
+        // live.
+        if (seed) socket.send(JSON.stringify({ type: "init", score: scoreRef.current }));
         setStatus("live");
         setUrl(`${location.origin}${location.pathname}#c=${roomId}`);
       };
@@ -98,11 +121,25 @@ export function useCollab(editor: EditorController, displayName: string) {
             if (message.snapshot) {
               loadScore(message.snapshot as CoreScore);
               for (const batch of message.batches ?? []) applyRemote(batch as OpBatch);
+            } else {
+              // The room has no snapshot: it was never seeded, or it was emptied
+              // when its last member left. Nobody would ever seed it again, and
+              // everyone in it would edit their own document while the banner
+              // said LIVE, so whoever notices first offers theirs. The server
+              // accepts only the unseeded case, so this cannot overwrite a live
+              // session.
+              socket.send(JSON.stringify({ type: "init", score: scoreRef.current }));
             }
             if (message.peers) setPeers(message.peers);
             break;
           case "batch":
             if (message.batch) applyRemote(message.batch as OpBatch);
+            break;
+          case "full":
+            // The room stopped accepting edits. Saying so is the point: the
+            // alternative was the user going on seeing their own work while
+            // nobody else received any of it.
+            setError(message.reason ?? "this live session is full");
             break;
           case "peers":
             if (message.peers) setPeers(message.peers);
@@ -134,16 +171,17 @@ export function useCollab(editor: EditorController, displayName: string) {
         setCursors(new Map());
       };
     },
-    [displayName, loadScore, applyRemote, setLiveOrdering],
+    // Deliberately free of displayName and of the score: both are read from
+    // refs, so `connect` — and therefore `join` — keeps a stable identity and
+    // the effect that joins from a link never reconnects on its own.
+    [loadScore, applyRemote, setLiveOrdering],
   );
 
   /** Host: open a room seeded with the score being edited. */
-  const start = useCallback(() => {
-    connect(newRoomId(), editor.score);
-  }, [connect, editor.score]);
+  const start = useCallback(() => connect(newRoomId(), true), [connect]);
 
   /** Guest: join an existing room from a #c= link. */
-  const join = useCallback((roomId: string) => connect(roomId, null), [connect]);
+  const join = useCallback((roomId: string) => connect(roomId, false), [connect]);
 
   const stop = useCallback(() => {
     socketRef.current?.close();

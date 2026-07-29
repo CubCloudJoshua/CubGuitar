@@ -30,11 +30,21 @@ export function clockText(seconds: number): string {
   return `${Math.floor(whole / 60)}:${String(whole % 60).padStart(2, "0")}`;
 }
 
-/** Turns a page: most of a screen, not all of it. The overlap is what keeps a
- * player from losing their place across the turn. */
+/**
+ * Turns a page: most of a screen, not all of it. The overlap is what keeps a
+ * player from losing their place across the turn.
+ *
+ * The preference is read here rather than left to CSS: an explicit `behavior`
+ * on scrollBy overrides `scroll-behavior`, so the global reduced-motion rule in
+ * index.html cannot reach it.
+ */
 export function turnPage(scroller: HTMLElement | null, direction: 1 | -1): void {
   if (!scroller) return;
-  scroller.scrollBy({ top: direction * scroller.clientHeight * 0.8, behavior: "smooth" });
+  const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+  scroller.scrollBy({
+    top: direction * scroller.clientHeight * 0.8,
+    behavior: still ? "auto" : "smooth",
+  });
 }
 
 /**

@@ -58,8 +58,12 @@ export function localCommit(session: Session, batch: OpBatch): Session {
 
 /**
  * Takes a batch the server has ordered, from anyone including this client.
- * Duplicate delivery is safe: advancing confirmed twice is a no-op by the
- * convergence contract, and retiring an already-retired batch changes nothing.
+ *
+ * Duplicate delivery is safe, but only because the inserts check for their own
+ * id before splicing. Without that, a redelivered `beat.insert` produced a
+ * second beat carrying the identical id, and two elements sharing an id make
+ * every op that addresses it ambiguous — the document is corrupt from then on.
+ * Retiring an already-retired batch changes nothing.
  */
 export function serverBatch(session: Session, batch: OpBatch): Session {
   const confirmed = applyBatch(session.confirmed, batch);

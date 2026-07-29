@@ -29,7 +29,11 @@ export function newSessionToken(): string {
 
 export function normalizeEmail(raw: unknown): string | null {
   if (typeof raw !== "string") return null;
-  const email = raw.trim().toLowerCase();
+  // NFC first: the same address typed and pasted can differ in composition, and
+  // the store hashes this string. Without it "josé@..." registers twice — once
+  // composed, once decomposed — and the second signup silently creates an empty
+  // second account while the first one's library appears to have vanished.
+  const email = raw.normalize("NFC").trim().toLowerCase();
   // Deliberately loose: enough to keep garbage out, not a deliverability check.
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) return null;
   return email;

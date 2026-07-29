@@ -26,6 +26,17 @@
         under this query can override them; near-zero rather than zero keeps
         transitionend/animationend listeners firing.
       */
+      /* The share card springs in from the press that made it. */
+      @keyframes cub-share-in {
+        from {
+          opacity: 0;
+          transform: translateY(-8px) scale(0.97);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
       @media (prefers-reduced-motion: reduce) {
         *,
         *::before,

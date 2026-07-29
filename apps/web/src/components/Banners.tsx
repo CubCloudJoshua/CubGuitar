@@ -1,4 +1,4 @@
-import { Button, color, font, Label, TextField, typeScale } from "@cubscore/design";
+import { Button, color, font, typeScale } from "@cubscore/design";
 import type { ImportReport } from "@cubscore/formats";
 
 export function ErrorBanner({ message }: { message: string }) {
@@ -17,41 +17,6 @@ export function ErrorBanner({ message }: { message: string }) {
       }}
     >
       {message}
-    </div>
-  );
-}
-
-export function ShareLinkBar({ url, onDismiss }: { url: string; onDismiss: () => void }) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "center",
-        gap: 8,
-        background: color.raised,
-        border: `1px solid ${color.accent}`,
-        borderRadius: 8,
-        padding: 10,
-        marginBottom: 10,
-      }}
-    >
-      <Label style={{ color: color.accent }}>LINK</Label>
-      <TextField
-        readOnly
-        value={url}
-        aria-label="Share link"
-        onFocus={(e) => e.target.select()}
-        style={{ flex: 1 }}
-      />
-      <Button
-        variant="outline"
-        onClick={() => void navigator.clipboard.writeText(url).catch(() => undefined)}
-      >
-        COPY
-      </Button>
-      <Button onClick={onDismiss} style={{ color: color.textDim }}>
-        ×
-      </Button>
     </div>
   );
 }

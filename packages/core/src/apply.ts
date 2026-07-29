@@ -81,6 +81,11 @@ export function applyOp(score: Score, op: Op): Score {
       return score.artist === op.artist ? score : { ...score, artist: op.artist };
 
     case "track.insert": {
+      // Already present: this is a redelivery, not a second track. Inserts are
+      // the ops that are not naturally idempotent — note.insert replaces by
+      // string, but a splice happily adds a second element with the same id,
+      // and two elements sharing an id make every later op ambiguous.
+      if (score.tracks.some((t) => t.id === op.track.id)) return score;
       const tracks = [...score.tracks];
       tracks.splice(Math.max(0, Math.min(op.index, tracks.length)), 0, op.track);
       return { ...score, tracks };
@@ -99,6 +104,7 @@ export function applyOp(score: Score, op: Op): Score {
     case "bar.insert":
       return mapTracks(score, (t) => {
         if (t.id !== op.trackId) return t;
+        if (t.bars.some((b) => b.id === op.bar.id)) return t;
         const bars = [...t.bars];
         bars.splice(Math.max(0, Math.min(op.index, bars.length)), 0, op.bar);
         return { ...t, bars };
@@ -134,6 +140,7 @@ export function applyOp(score: Score, op: Op): Score {
     case "beat.insert":
       return mapVoices(score, (v) => {
         if (v.id !== op.voiceId) return v;
+        if (v.beats.some((b) => b.id === op.beat.id)) return v;
         const beats = [...v.beats];
         beats.splice(Math.max(0, Math.min(op.index, beats.length)), 0, op.beat);
         return { ...v, beats };
@@ -206,13 +213,26 @@ export function applyOp(score: Score, op: Op): Score {
   }
 }
 
-/** Applies a batch as one unit and advances the revision once. */
+/**
+ * Applies a batch as one unit and advances the revision once.
+ *
+ * Batches arrive over a WebSocket from anyone holding a session link, so this
+ * takes an `OpBatch` by type and untrusted JSON in practice. It must not throw:
+ * a batch with no `ops` array used to throw out of the React state updater that
+ * called it, which — with no error boundary above it — blanked the tab of every
+ * member of the session. The server stores what it broadcasts, so the same
+ * batch then crashed everyone who joined afterwards and the room stayed dead
+ * until the process restarted. A malformed batch is now a batch that does
+ * nothing.
+ */
 export function applyBatch(score: Score, batch: OpBatch): Score {
+  const ops: readonly Op[] = Array.isArray(batch?.ops) ? batch.ops : [];
   let next = score;
-  for (const op of batch.ops) {
-    const applied = applyOp(next, op);
-    // Belt and braces alongside applyOp's default case: a malformed batch can
+  for (const op of ops) {
+    // Belt and braces alongside applyOp's default case: a malformed op can
     // never replace a document with a partial object.
+    if (!op || typeof op !== "object") continue;
+    const applied = applyOp(next, op);
     next = applied ?? next;
   }
   return next === score ? score : { ...next, revision: score.revision + 1 };

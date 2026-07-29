@@ -24,11 +24,19 @@ export interface SharedScore {
   ownerId?: string;
 }
 
+/** What a share list needs. Never the body: see FileStore.listByOwner. */
+export interface ShareSummary {
+  id: string;
+  title: string;
+  artist: string;
+  createdAt: number;
+}
+
 export interface ScoreStore {
   put(record: SharedScore): Promise<void>;
   get(id: string): Promise<SharedScore | undefined>;
   delete(id: string): Promise<void>;
-  listByOwner(ownerId: string): Promise<SharedScore[]>;
+  listByOwner(ownerId: string): Promise<ShareSummary[]>;
 }
 
 export interface User {
@@ -165,6 +173,19 @@ class JsonDir<T extends { id: string }> {
   }
 
   async all(): Promise<T[]> {
+    return this.collect((record) => record);
+  }
+
+  /**
+   * Reads one record at a time, keeping only what `pick` returns.
+   *
+   * all() built an array of every record first. For shares that means every
+   * base64 body — up to 24 MB each — resident at once, so a few hundred shared
+   * Guitar Pro files turned one signed-in user opening the account panel into
+   * gigabytes in a single request. Filtering as it reads keeps the peak at one
+   * record.
+   */
+  async collect<R>(pick: (record: T) => R | undefined): Promise<R[]> {
     let names: string[];
     try {
       names = (await readdir(this.dir)).filter((n) => n.endsWith(".json"));
@@ -172,10 +193,12 @@ class JsonDir<T extends { id: string }> {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw e;
     }
-    const out: T[] = [];
+    const out: R[] = [];
     for (const name of names) {
       const record = await this.get(name.slice(0, -5));
-      if (record) out.push(record);
+      if (!record) continue;
+      const kept = pick(record);
+      if (kept !== undefined) out.push(kept);
     }
     return out;
   }
@@ -200,10 +223,18 @@ export class FileStore implements ScoreStore {
     return this.docs.delete(id);
   }
 
-  /** Linear scan; fine for the dev driver, an indexed query in production. */
-  async listByOwner(ownerId: string): Promise<SharedScore[]> {
-    const all = await this.docs.all();
-    return all.filter((s) => s.ownerId === ownerId).sort((a, b) => b.createdAt - a.createdAt);
+  /**
+   * Linear scan; fine for the dev driver, an indexed query in production. Only
+   * the metadata is retained, because that is all the caller sends and the
+   * bodies are what would exhaust memory.
+   */
+  async listByOwner(ownerId: string): Promise<ShareSummary[]> {
+    const mine = await this.docs.collect((s) =>
+      s.ownerId === ownerId
+        ? { id: s.id, title: s.title, artist: s.artist, createdAt: s.createdAt }
+        : undefined,
+    );
+    return mine.sort((a, b) => b.createdAt - a.createdAt);
   }
 }
 
@@ -230,24 +261,62 @@ export class FileUserStore implements UserStore {
     return this.docs.get(id);
   }
 
-  claimEmail(email: string, userId: string): Promise<boolean> {
+  /**
+   * Claims an address, and takes over a pointer whose user has gone.
+   *
+   * Without the takeover a single unreadable user record was a permanent
+   * lockout: the pointer resolved to nothing, so login answered "invalid email
+   * or password", and the exclusive claim meant the address could never be
+   * registered again — not by the user, not by support.
+   */
+  async claimEmail(email: string, userId: string): Promise<boolean> {
     const key = FileUserStore.key(email);
-    return this.emails.claim(key, { id: key, userId });
+    if (await this.emails.claim(key, { id: key, userId })) return true;
+    const existing = await this.emails.get(key);
+    if (existing && (await this.docs.get(existing.userId))) return false;
+    await this.emails.put({ id: key, userId });
+    return true;
   }
 
-  async byEmail(email: string): Promise<User | undefined> {
-    const pointer = await this.emails.get(FileUserStore.key(email));
-    if (pointer) return this.docs.get(pointer.userId);
-    // Accounts created before the index existed are only findable by scan.
-    const all = await this.docs.all();
-    return all.find((u) => u.email === email);
+  byEmail(email: string): Promise<User | undefined> {
+    // Index only. This used to fall back to reading every user record when the
+    // address was not indexed, which meant any unknown address — a fresh random
+    // one on every request, so no per-address limit applied — cost one file read
+    // per account on the server. A few thousand requests took the API down for
+    // everyone. Records written before the index exists are migrated at boot;
+    // see indexExistingEmails.
+    return this.emails
+      .get(FileUserStore.key(email))
+      .then((pointer) => (pointer ? this.docs.get(pointer.userId) : undefined));
+  }
+
+  /**
+   * Gives every user record an index entry, once, at startup.
+   *
+   * This is the migration that replaces the per-login fallback scan: it costs
+   * one pass over the accounts when the process starts rather than one pass per
+   * unrecognised login attempt forever.
+   */
+  async indexExistingEmails(): Promise<number> {
+    let added = 0;
+    for (const user of await this.docs.all()) {
+      const key = FileUserStore.key(user.email);
+      if (await this.emails.claim(key, { id: key, userId: user.id })) added += 1;
+    }
+    return added;
   }
 }
 
 export class FileSessionStore implements SessionStore {
   private readonly docs: JsonDir<{ id: string; userId: string; createdAt: number }>;
 
-  constructor(dir: string) {
+  /**
+   * @param maxAgeMs How long a session stays valid. The cookie's Max-Age is a
+   * hint the client may ignore; this is the part that is enforced. Without it a
+   * token that leaked any other way — a proxy log, a backup, a copied browser
+   * profile, the data directory itself — authenticated forever.
+   */
+  constructor(dir: string, private readonly maxAgeMs: number) {
     this.docs = new JsonDir(dir);
   }
 
@@ -256,7 +325,15 @@ export class FileSessionStore implements SessionStore {
   }
 
   async userIdFor(token: string): Promise<string | undefined> {
-    return (await this.docs.get(token))?.userId;
+    const session = await this.docs.get(token);
+    if (!session) return undefined;
+    if (Date.now() - session.createdAt > this.maxAgeMs) {
+      // Expired sessions are cleaned up as they are presented, which keeps the
+      // directory from growing one file per login forever.
+      await this.docs.delete(token);
+      return undefined;
+    }
+    return session.userId;
   }
 
   destroy(token: string): Promise<void> {

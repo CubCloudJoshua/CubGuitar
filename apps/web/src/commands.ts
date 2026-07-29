@@ -22,6 +22,8 @@ interface CommandDeps {
   openFilePicker: () => void;
   toggleAccount: () => void;
   startPerforming: () => void;
+  /** Runs an action that changes which document is open. See App.tsx. */
+  switchDocument: (open: () => void) => void;
 }
 
 export function useCommands(deps: CommandDeps): Command[] {
@@ -42,7 +44,9 @@ export function useCommands(deps: CommandDeps): Command[] {
     }
 
     if (!sharedView) {
-      add({ id: "new", title: "New score", section: "Score", run: lib.startNewScore });
+      // Both change which document is open, so both go through the shell's
+      // switch, which ends a live session first rather than forking it.
+      add({ id: "new", title: "New score", section: "Score", run: () => deps.switchDocument(lib.startNewScore) });
       add({ id: "open", title: "Open file…", section: "Score", run: deps.openFilePicker });
       add({ id: "library", title: "Toggle library", section: "Score", hint: "Cmd+L", run: () => lib.setLibraryOpen((v) => !v) });
       if (canShare) add({ id: "share", title: "Share current score", section: "Score", run: deps.shareCurrent });

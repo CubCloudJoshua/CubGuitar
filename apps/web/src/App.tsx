@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useAlphaTab } from "./useAlphaTab";
 import { useNarrow } from "./useNarrow";
 import { useEditor } from "./editor/useEditor";
@@ -16,7 +16,8 @@ import { TransportPill } from "./components/TransportPill";
 import { ExportMenu } from "./components/ExportMenu";
 import { LibraryPanel } from "./library/LibraryPanel";
 import { AccountPanel } from "./auth/AccountPanel";
-import { ErrorBanner, ImportNoticeBanner, ShareLinkBar } from "./components/Banners";
+import { ErrorBanner, ImportNoticeBanner } from "./components/Banners";
+import { ShareCard } from "./share/ShareCard";
 import { useCommands } from "./commands";
 import { Button, buttonStyle, color, CommandPalette, Drawer, font, motion, stage, TextField, typeScale } from "@cubscore/design";
 
@@ -100,6 +101,25 @@ export function App() {
     return () => document.removeEventListener("keydown", onKey);
   }, [playPause, setLibraryOpen]);
 
+  /**
+   * Leaves a live session before changing which document is open.
+   *
+   * A live session is one shared document. Opening a different one kept the
+   * session "live" while silently forking it: from that moment the host's ops
+   * addressed ids the guest's document did not contain, so every batch became a
+   * no-op on the far side, both banners still read LIVE, and neither person saw
+   * the other's edits again. Ending the session is what the user is asking for
+   * anyway — they have moved on to another piece of music.
+   */
+  const { stop: stopCollab, status: collabStatus } = collab;
+  const switchDocument = useCallback(
+    (open: () => void) => {
+      if (collabStatus !== "off") stopCollab();
+      open();
+    },
+    [collabStatus, stopCollab],
+  );
+
   const editing = !shared.active && lib.mode === "edit";
   const currentEntry = lib.entries.find((e) => e.id === lib.currentId);
   const canEditCurrent = !shared.active && currentEntry?.core != null;
@@ -121,6 +141,7 @@ export function App() {
       if (editing) lib.leaveEditor();
       setPerforming(true);
     },
+    switchDocument,
   });
   // Playback dims the chrome so the score carries the screen; editing keeps
   // its tools at full strength since play-along editing is a real workflow.
@@ -157,7 +178,7 @@ export function App() {
         e.preventDefault();
         if (performing) return;
         const file = e.dataTransfer.files[0];
-        if (file) void lib.importFile(file);
+        if (file) switchDocument(() => void lib.importFile(file));
       }}
     >
       <header
@@ -220,9 +241,9 @@ export function App() {
             LIBRARY
           </Button>
         )}
-        {!shared.active && <Button variant="outline" onClick={lib.startNewScore}>NEW</Button>}
+        {!shared.active && <Button variant="outline" onClick={() => switchDocument(lib.startNewScore)}>NEW</Button>}
         {!editing && canEditCurrent && (
-          <Button variant="outline" onClick={lib.editImported}>EDIT</Button>
+          <Button variant="outline" onClick={() => switchDocument(() => void lib.editImported())}>EDIT</Button>
         )}
         {editing && (
           <Button variant="outline" onClick={lib.leaveEditor}>PLAYER</Button>
@@ -287,7 +308,7 @@ export function App() {
           style={{ display: "none" }}
           onChange={(e) => {
             const file = e.target.files?.[0];
-            if (file) void lib.importFile(file);
+            if (file) switchDocument(() => void lib.importFile(file));
             e.target.value = "";
           }}
         />
@@ -301,7 +322,7 @@ export function App() {
         />
       )}
 
-      {shareLink.url && <ShareLinkBar url={shareLink.url} onDismiss={shareLink.dismiss} />}
+      {shareLink.url && !performing && <ShareCard url={shareLink.url} onDismiss={shareLink.dismiss} />}
       {collab.status === "live" && collab.url && (
         <div
           style={{
@@ -442,7 +463,7 @@ export function App() {
             <Setlist
               entries={lib.entries}
               currentId={lib.currentId}
-              onOpen={(entry) => void lib.openEntry(entry, { playerOnly: true })}
+              onOpen={(entry) => switchDocument(() => void lib.openEntry(entry, { playerOnly: true }))}
             />
           )}
         </>
@@ -471,7 +492,7 @@ export function App() {
           <LibraryPanel
             entries={lib.entries}
             currentId={lib.currentId}
-            onOpen={(e) => void lib.openEntry(e)}
+            onOpen={(e) => switchDocument(() => void lib.openEntry(e))}
             onDelete={(id) => void lib.removeEntry(id)}
             onImportClick={() => fileInputRef.current?.click()}
           />

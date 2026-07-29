@@ -12,7 +12,16 @@
  */
 import { describe, expect, it } from "vitest";
 import { applyBatch } from "./apply.js";
-import { createNote, createScore, nextId } from "./build.js";
+import {
+  createBar,
+  createNote,
+  createRest,
+  createScore,
+  createTrack,
+  duration,
+  frettedGuitar,
+  nextId,
+} from "./build.js";
 import { beginSession, localCommit, serverBatch, sessionView } from "./session.js";
 import { toAlphaTex } from "./alphatex.js";
 import type { Op, OpBatch, OpKind, Score } from "./index.js";
@@ -213,6 +222,82 @@ describe("live session ordering", () => {
 
     expect(alice.music).toBe(once);
     expect(bob.music).toBe(once);
+  });
+
+  /**
+   * note.insert is idempotent by construction — it filters the string, then
+   * appends — so testing redelivery with it proves nothing about the ops that
+   * splice. Those add a second element carrying the identical id, and from then
+   * on every op addressing that id is ambiguous.
+   */
+  it("survives redelivery of the ops that insert by index", () => {
+    const base = createScore("Redelivered inserts");
+    const track = base.tracks[0];
+    if (!track) throw new Error("no track");
+    const voice = track.bars[0]?.voices[0];
+    if (!voice) throw new Error("no voice");
+
+    const cases = [
+      {
+        what: "beat.insert",
+        b: batch("beat", { type: "beat.insert", voiceId: voice.id, index: 1, beat: createRest(duration(4)) }),
+        count: (s: Score) => s.tracks[0]?.bars[0]?.voices[0]?.beats.length ?? 0,
+      },
+      {
+        what: "bar.insert",
+        b: batch("bar", { type: "bar.insert", trackId: track.id, index: 1, bar: createBar() }),
+        count: (s: Score) => s.tracks[0]?.bars.length ?? 0,
+      },
+      {
+        what: "track.insert",
+        b: batch("track", {
+          type: "track.insert",
+          index: 1,
+          track: createTrack("Second", frettedGuitar(), 2),
+        }),
+        count: (s: Score) => s.tracks.length,
+      },
+    ];
+
+    for (const { what, b, count } of cases) {
+      const once = applyBatch(base, b);
+      const twice = applyBatch(once, b);
+      expect(count(twice), `${what} applied twice`).toBe(count(once));
+      // And no two elements anywhere share an id, which is the damage the count
+      // check is standing in for.
+      const ids = [
+        ...twice.tracks.map((t) => t.id),
+        ...twice.tracks.flatMap((t) => t.bars.map((bar) => bar.id)),
+        ...twice.tracks.flatMap((t) => t.bars.flatMap((bar) => bar.voices.flatMap((v) => v.beats.map((x) => x.id)))),
+      ];
+      expect(new Set(ids).size, `${what} left duplicate ids`).toBe(ids.length);
+    }
+  });
+
+  /**
+   * Batches arrive from anyone holding the session link. A batch with no ops
+   * array threw out of the React state updater that applied it, and with no
+   * error boundary above it that blanked every member's tab — then crashed
+   * everyone who joined afterwards, because the server had stored it.
+   */
+  it("treats a malformed batch as one that does nothing", () => {
+    const base = createScore("Malformed");
+    const session = beginSession(base);
+    const junk = [
+      { id: "k1", label: "no ops" },
+      { id: "k2", label: "null ops", ops: null },
+      { id: "k3", label: "ops is not an array", ops: { 0: "x" } },
+      { id: "k4", label: "op is not an object", ops: ["nope", 42, null] },
+      42,
+      "batch",
+      null,
+    ];
+    for (const value of junk) {
+      const batchLike = value as unknown as OpBatch;
+      expect(() => applyBatch(base, batchLike), JSON.stringify(value)).not.toThrow();
+      expect(applyBatch(base, batchLike)).toBe(base);
+      expect(() => serverBatch(session, batchLike), JSON.stringify(value)).not.toThrow();
+    }
   });
 
   it("reports no change by identity when a batch moves nothing", () => {

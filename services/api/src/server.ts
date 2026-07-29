@@ -40,14 +40,22 @@ const COOKIE_MAX_AGE = 30 * 24 * 60 * 60;
 
 const scores = new FileStore(path.join(DATA_DIR, "scores"));
 const users = new FileUserStore(path.join(DATA_DIR, "users"));
-const sessions = new FileSessionStore(path.join(DATA_DIR, "sessions"));
+const sessions = new FileSessionStore(path.join(DATA_DIR, "sessions"), COOKIE_MAX_AGE * 1000);
 const library = new FileLibraryStore(path.join(DATA_DIR, "library"));
 
-// Behind a reverse proxy every request arrives from the proxy, so keying a
-// rate limit on the socket address would put every user in one bucket and let
-// one busy client lock out the rest. Set TRUST_PROXY=1 only when a proxy you
-// control sets X-Forwarded-For, because otherwise clients can forge it.
-const app = Fastify({ bodyLimit: MAX_BODY, trustProxy: process.env.TRUST_PROXY === "1" });
+// Behind a reverse proxy every request arrives from the proxy, so keying a rate
+// limit on the socket address would put every user in one bucket and let one
+// busy client lock out the rest. TRUST_PROXY=1 means "trust exactly one hop":
+// take the address our own proxy appended and ignore anything the client sent.
+// `true` here would have meant "trust every hop", which makes request.ip the
+// leftmost X-Forwarded-For token — an arbitrary attacker-supplied string, not
+// even necessarily an address. That defeats every per-IP limit at once and, since
+// each distinct value allocates a counter, lets one client grow the counter map
+// until the process runs out of memory.
+const app = Fastify({
+  bodyLimit: MAX_BODY,
+  trustProxy: process.env.TRUST_PROXY === "1" ? 1 : false,
+});
 
 /**
  * In-memory rate limiting, per client and per bucket.
@@ -64,13 +72,29 @@ const LIMITS = {
 
 const hits = new Map<string, { count: number; resetAt: number }>();
 
-function tooMany(bucket: keyof typeof LIMITS, key: string): boolean {
+/** Bounds a rate-limit key, so a long header cannot become a long map key. */
+const MAX_KEY = 100;
+
+function tooMany(bucket: keyof typeof LIMITS, rawKey: string): boolean {
+  const key = rawKey.slice(0, MAX_KEY);
   const now = Date.now();
   // Every distinct key allocates an entry, so a stream of unique addresses
-  // would grow this map without bound. Sweep expired entries when it gets
-  // big rather than scanning on every request.
+  // would grow this map without bound. Sweeping only expired entries is not
+  // enough on its own: inside one window nothing is expired, so the map kept
+  // growing and every request paid for a full scan that reclaimed nothing.
+  // Past the limit, the oldest entries go — losing a counter costs an attacker
+  // a fresh budget, which is strictly better than losing the process.
   if (hits.size > 20_000) {
     for (const [k, v] of hits) if (now >= v.resetAt) hits.delete(k);
+    let excess = hits.size - 20_000;
+    if (excess > 0) {
+      // Map iteration is insertion-ordered, so this drops the least recently
+      // created counters first.
+      for (const k of hits.keys()) {
+        if (excess-- <= 0) break;
+        hits.delete(k);
+      }
+    }
   }
   const limit = LIMITS[bucket];
   const mapKey = `${bucket} ${key}`;
@@ -208,7 +232,13 @@ app.get("/api/library", async (request, reply) => {
 app.put<{ Params: { id: string } }>("/api/library/:id", async (request, reply) => {
   const user = await currentUser(request);
   if (!user) return reply.status(401).send({ error: "not signed in" });
-  if (tooMany("write", user.id)) return reply.status(429).send({ error: "rate limit exceeded" });
+  // Both, because either alone is a hole: per-account so one busy user behind a
+  // shared address cannot lock out the others, and per-address so minting
+  // accounts does not multiply the budget — registration costs an attacker
+  // nothing, and there is no storage quota behind this yet.
+  if (tooMany("write", user.id) || tooMany("write", request.ip)) {
+    return reply.status(429).send({ error: "rate limit exceeded" });
+  }
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(request.params.id)) {
     return reply.status(400).send({ error: "invalid id" });
   }
@@ -255,6 +285,11 @@ app.get<{ Params: { id: string } }>("/api/library/:id", async (request, reply) =
 app.delete<{ Params: { id: string } }>("/api/library/:id", async (request, reply) => {
   const user = await currentUser(request);
   if (!user) return reply.status(401).send({ error: "not signed in" });
+  // Validated like PUT: an unsafe id threw out of the store and answered 500
+  // where the honest answer is 400.
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(request.params.id)) {
+    return reply.status(400).send({ error: "invalid id" });
+  }
   await library.delete(user.id, request.params.id);
   return { ok: true };
 });
@@ -312,8 +347,8 @@ app.get<{ Params: { id: string } }>("/api/scores/:id", async (request, reply) =>
 app.get("/api/shares", async (request, reply) => {
   const user = await currentUser(request);
   if (!user) return reply.status(401).send({ error: "not signed in" });
-  const own = await scores.listByOwner(user.id);
-  return own.map((s) => ({ id: s.id, title: s.title, artist: s.artist, createdAt: s.createdAt }));
+  // Already metadata only: the store never loads share bodies for a list.
+  return scores.listByOwner(user.id);
 });
 
 app.delete<{ Params: { id: string } }>("/api/scores/:id", async (request, reply) => {
@@ -328,8 +363,16 @@ app.delete<{ Params: { id: string } }>("/api/scores/:id", async (request, reply)
 
 app.get("/api/health", async () => ({ ok: true }));
 
-app
-  .listen({ port: PORT, host: "127.0.0.1" })
+// Index any account written before the email index existed, once, here. This is
+// what lets login be a two-read lookup with no fallback scan — the scan it
+// replaces cost one file read per account for every unrecognised address.
+users
+  .indexExistingEmails()
+  .then((added) => {
+    if (added > 0) console.log(`cubscore api: indexed ${added} pre-existing email(s)`);
+  })
+  .catch((err) => console.error("cubscore api: email index migration failed", err))
+  .then(() => app.listen({ port: PORT, host: "127.0.0.1" }))
   .then(() => console.log(`cubscore api on :${PORT}, data in ${DATA_DIR}`))
   .catch((err) => {
     console.error(err);
