@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { theme } from "../theme";
-import { toggleStyle } from "../components/Toolbar";
+import { Button, color, font, Label, SelectField, TextField, typeScale, VDivider } from "@cubscore/design";
 import type { Articulation } from "@cubscore/core";
 import type { EditorController } from "./useEditor";
 
@@ -23,16 +22,6 @@ const ARTICULATIONS: Array<[string, Articulation]> = [
   ["N.H.", "naturalHarmonic"],
   ["Dead", "deadNote"],
 ];
-
-const btn = {
-  fontFamily: theme.mono,
-  fontSize: 11,
-  padding: "5px 9px",
-  border: `1px solid ${theme.border}`,
-  background: theme.panelAlt,
-  color: theme.text,
-  cursor: "pointer",
-} as const;
 
 /** Global key handling, so the editor behaves like a desktop app. */
 function useEditorKeys(e: EditorController, enabled: boolean, allowHistory: boolean) {
@@ -76,7 +65,7 @@ function useEditorKeys(e: EditorController, enabled: boolean, allowHistory: bool
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [e, enabled]);
+  }, [e, enabled, allowHistory]);
 }
 
 /** Commits on blur or Enter, so typing does not flood the op log. */
@@ -84,10 +73,12 @@ function MetaField({
   label,
   value,
   onCommit,
+  width = 120,
 }: {
   label: string;
   value: string;
   onCommit: (next: string) => void;
+  width?: number;
 }) {
   const [draft, setDraft] = useState(value);
   // Enter commits and then blurs, and the blur fires before React re-renders
@@ -109,8 +100,8 @@ function MetaField({
 
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 4 }}>
-      <span style={labelStyle}>{label}</span>
-      <input
+      <Label>{label}</Label>
+      <TextField
         value={draft}
         onChange={(ev) => setDraft(ev.target.value)}
         onBlur={commit}
@@ -122,35 +113,11 @@ function MetaField({
           }
         }}
         aria-label={`Score ${label.toLowerCase()}`}
-        style={{
-          fontFamily: theme.mono,
-          fontSize: 12,
-          padding: "5px 8px",
-          width: label === "TITLE" ? 160 : 120,
-          background: theme.bg,
-          border: `1px solid ${theme.border}`,
-          color: theme.text,
-        }}
+        style={{ width, padding: "5px 8px" }}
       />
     </label>
   );
 }
-
-const labelStyle = {
-  fontFamily: theme.mono,
-  fontSize: 11,
-  color: theme.textDim,
-  letterSpacing: 0.5,
-} as const;
-
-const selectStyle = {
-  fontFamily: theme.mono,
-  fontSize: 12,
-  padding: "5px 6px",
-  background: theme.bg,
-  border: `1px solid ${theme.border}`,
-  color: theme.text,
-} as const;
 
 /** Meter in force at the cursor's bar: the nearest signature at or before it. */
 function effectiveMeter(e: EditorController): { beats: number; beatValue: number } {
@@ -180,8 +147,9 @@ export function EditorBar({
   return (
     <div
       style={{
-        background: theme.panel,
-        border: `1px solid ${theme.accent}`,
+        background: color.raised,
+        border: `1px solid ${color.accent}`,
+        borderRadius: 8,
         padding: 10,
         marginBottom: 10,
         display: "flex",
@@ -190,146 +158,129 @@ export function EditorBar({
         alignItems: "center",
       }}
     >
-      <span style={{ fontFamily: theme.mono, fontSize: 11, color: theme.accent, letterSpacing: 0.5 }}>
-        EDIT
-      </span>
-      <span style={{ fontFamily: theme.mono, fontSize: 11, color: theme.textDim }}>
+      <Label style={{ color: color.accent }}>EDIT</Label>
+      <Label>
         bar {e.cursor.bar + 1} · beat {e.cursor.beat + 1} · string {e.cursor.string}
         {note ? ` · fret ${note.fret}` : " · empty"}
-      </span>
+      </Label>
 
-      <Divider />
-      <MetaField label="TITLE" value={e.score.title} onCommit={e.setTitle} />
+      <VDivider />
+      <MetaField label="TITLE" value={e.score.title} onCommit={e.setTitle} width={160} />
       <MetaField label="ARTIST" value={e.score.artist} onCommit={e.setArtist} />
 
-      <Divider />
-      <label style={labelStyle}>TRACK</label>
-      <select
+      <VDivider />
+      <Label>TRACK</Label>
+      <SelectField
         value={e.cursor.track}
         onChange={(ev) => e.selectTrack(Number(ev.target.value))}
         aria-label="Active track"
-        style={selectStyle}
       >
         {e.score.tracks.map((t, i) => (
           <option key={t.id} value={i}>
             {t.name}
           </option>
         ))}
-      </select>
-      <button onClick={() => e.addTrack("guitar")} style={btn} title="Add a standard-tuned guitar track">
+      </SelectField>
+      <Button size="sm" onClick={() => e.addTrack("guitar")} title="Add a standard-tuned guitar track">
         +GTR
-      </button>
-      <button onClick={() => e.addTrack("bass")} style={btn} title="Add a standard-tuned bass track">
+      </Button>
+      <Button size="sm" onClick={() => e.addTrack("bass")} title="Add a standard-tuned bass track">
         +BASS
-      </button>
-      <button
+      </Button>
+      <Button
+        size="sm"
         onClick={e.removeTrack}
-        style={{ ...btn, opacity: e.score.tracks.length > 1 ? 1 : 0.4 }}
         disabled={e.score.tracks.length <= 1}
         title="Remove the active track"
       >
         ✕TRK
-      </button>
+      </Button>
 
-      <Divider />
+      <VDivider />
       <MetaField
         label="BPM"
         value={String(e.score.tracks[0]?.bars[0]?.tempoBpm ?? 120)}
         onCommit={(v) => e.setTempo(Number(v))}
+        width={48}
       />
-      <label style={labelStyle}>METER</label>
-      <select
+      <Label>METER</Label>
+      <SelectField
         value={effectiveMeter(e).beats}
         onChange={(ev) => e.setTimeSignature(Number(ev.target.value), effectiveMeter(e).beatValue)}
         aria-label="Beats per bar"
-        style={selectStyle}
       >
         {[2, 3, 4, 5, 6, 7, 9, 12].map((n) => (
           <option key={n} value={n}>{n}</option>
         ))}
-      </select>
-      <span style={{ ...labelStyle, color: theme.text }}>/</span>
-      <select
+      </SelectField>
+      <Label style={{ color: color.text }}>/</Label>
+      <SelectField
         value={effectiveMeter(e).beatValue}
         onChange={(ev) => e.setTimeSignature(effectiveMeter(e).beats, Number(ev.target.value))}
         aria-label="Beat value"
-        style={selectStyle}
       >
         {[2, 4, 8, 16].map((n) => (
           <option key={n} value={n}>{n}</option>
         ))}
-      </select>
+      </SelectField>
 
-      <Divider />
-      <span style={label}>NOTE</span>
+      <VDivider />
+      <Label>NOTE</Label>
       {DURATIONS.map(([text, d]) => (
-        <button
+        <Button
           key={d}
+          size="sm"
           onClick={() => e.setDuration(d)}
-          style={toggleStyle(e.currentBeat?.duration.denominator === d)}
+          active={e.currentBeat?.duration.denominator === d}
         >
           {text}
-        </button>
+        </Button>
       ))}
-      <button onClick={e.toggleDot} style={toggleStyle(e.currentBeat?.dots === 1)}>
+      <Button size="sm" onClick={e.toggleDot} active={e.currentBeat?.dots === 1}>
         DOT
-      </button>
+      </Button>
 
-      <Divider />
+      <VDivider />
       {ARTICULATIONS.map(([text, a]) => (
-        <button
+        <Button
           key={a}
+          size="sm"
           onClick={() => e.toggleArticulation(a)}
           disabled={!note}
-          style={{
-            ...toggleStyle(note?.articulations.includes(a) ?? false),
-            opacity: note ? 1 : 0.4,
-            cursor: note ? "pointer" : "default",
-          }}
+          active={note?.articulations.includes(a) ?? false}
         >
           {text}
-        </button>
+        </Button>
       ))}
 
-      <Divider />
-      <button onClick={e.insertBeat} style={btn}>+BEAT</button>
-      <button onClick={e.removeBeat} style={btn}>−BEAT</button>
-      <button onClick={e.addBar} style={btn}>+BAR</button>
-      <button onClick={e.deleteNote} style={btn} disabled={!note}>DEL</button>
+      <VDivider />
+      <Button size="sm" onClick={e.insertBeat}>+BEAT</Button>
+      <Button size="sm" onClick={e.removeBeat}>−BEAT</Button>
+      <Button size="sm" onClick={e.addBar}>+BAR</Button>
+      <Button size="sm" onClick={e.deleteNote} disabled={!note}>DEL</Button>
 
-      <Divider />
-      <button
+      <VDivider />
+      <Button
+        size="sm"
         onClick={e.undo}
-        style={{ ...btn, opacity: canUndo ? 1 : 0.4 }}
         disabled={!canUndo}
         title={allowHistory ? undefined : "Undo is unavailable during a live session"}
       >
         UNDO
-      </button>
-      <button
+      </Button>
+      <Button
+        size="sm"
         onClick={e.redo}
-        style={{ ...btn, opacity: canRedo ? 1 : 0.4 }}
         disabled={!canRedo}
         title={allowHistory ? undefined : "Undo is unavailable during a live session"}
       >
         REDO
-      </button>
+      </Button>
 
       <span style={{ flex: 1 }} />
-      <span style={{ fontFamily: theme.mono, fontSize: 10, color: theme.textDim }}>
+      <span style={{ fontFamily: font.mono, fontSize: typeScale.xs, color: color.textDim }}>
         type 0-9 for frets · arrows move · +/− beats · Enter adds a bar
       </span>
     </div>
   );
-}
-
-const label = {
-  fontFamily: theme.mono,
-  fontSize: 11,
-  color: theme.textDim,
-  letterSpacing: 0.5,
-} as const;
-
-function Divider() {
-  return <span style={{ width: 1, height: 18, background: theme.border }} />;
 }

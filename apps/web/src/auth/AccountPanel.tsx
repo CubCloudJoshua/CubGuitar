@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { theme } from "../theme";
+import { Button, color, font, Label, Panel, TextField, typeScale } from "@cubscore/design";
 import { syncNow } from "../library/sync";
 import type { AuthController } from "./useAuth";
 
@@ -9,25 +9,6 @@ interface ShareRow {
   artist: string;
   createdAt: number;
 }
-
-const field = {
-  fontFamily: theme.mono,
-  fontSize: 12,
-  padding: "6px 8px",
-  background: theme.bg,
-  border: `1px solid ${theme.border}`,
-  color: theme.text,
-} as const;
-
-const button = {
-  fontFamily: theme.mono,
-  fontSize: 11,
-  padding: "5px 10px",
-  border: `1px solid ${theme.accent}`,
-  background: "transparent",
-  color: theme.accent,
-  cursor: "pointer",
-} as const;
 
 export function AccountPanel({
   auth,
@@ -84,25 +65,13 @@ export function AccountPanel({
   );
 
   return (
-    <div
-      style={{
-        background: theme.panel,
-        border: `1px solid ${theme.accent}`,
-        padding: 12,
-        marginBottom: 10,
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
-    >
+    <Panel accent style={{ marginBottom: 10, display: "flex", flexDirection: "column", gap: 10, padding: 12 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontFamily: theme.mono, fontSize: 11, color: theme.accent, letterSpacing: 0.5 }}>
-          ACCOUNT
-        </span>
+        <Label style={{ color: color.accent }}>ACCOUNT</Label>
         <span style={{ flex: 1 }} />
-        <button onClick={onClose} style={{ ...button, borderColor: theme.border, color: theme.textDim }}>
+        <Button size="sm" onClick={onClose} style={{ color: color.textDim }}>
           ×
-        </button>
+        </Button>
       </div>
 
       {!auth.user ? (
@@ -113,60 +82,62 @@ export function AccountPanel({
           }}
           style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}
         >
-          <input
+          <TextField
             type="email"
             placeholder="email"
             autoComplete="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             aria-label="Email"
-            style={{ ...field, width: 200 }}
+            style={{ width: 200 }}
           />
-          <input
+          <TextField
             type="password"
             placeholder="password (8+ chars)"
             autoComplete="current-password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             aria-label="Password"
-            style={{ ...field, width: 170 }}
+            style={{ width: 170 }}
           />
-          <button type="submit" disabled={auth.busy} style={{ ...button, fontWeight: 700 }}>
+          <Button type="submit" variant="outline" disabled={auth.busy} style={{ fontWeight: 700 }}>
             SIGN IN
-          </button>
-          <button type="button" disabled={auth.busy} onClick={() => void submit("register")} style={button}>
+          </Button>
+          <Button type="button" variant="outline" disabled={auth.busy} onClick={() => void submit("register")}>
             CREATE ACCOUNT
-          </button>
+          </Button>
           {auth.error && (
-            <span style={{ fontFamily: theme.mono, fontSize: 11, color: "#ffb0b0" }}>{auth.error}</span>
+            <span style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.dangerText }}>
+              {auth.error}
+            </span>
           )}
-          <span style={{ flexBasis: "100%", fontFamily: theme.mono, fontSize: 10, color: theme.textDim }}>
+          <span
+            style={{ flexBasis: "100%", fontFamily: font.mono, fontSize: typeScale.xs, color: color.textDim }}
+          >
             Accounts back up your library and make share links revocable. No email verification yet.
           </span>
         </form>
       ) : (
         <>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-            <span style={{ fontFamily: theme.mono, fontSize: 12, color: theme.text }}>{auth.user.email}</span>
-            <button onClick={() => void runSync()} style={{ ...button, fontWeight: 700 }}>
+            <span style={{ fontFamily: font.mono, fontSize: typeScale.base, color: color.text }}>
+              {auth.user.email}
+            </span>
+            <Button variant="outline" onClick={() => void runSync()} style={{ fontWeight: 700 }}>
               SYNC LIBRARY
-            </button>
-            <button onClick={() => void auth.logout()} style={{ ...button, borderColor: theme.border, color: theme.textDim }}>
+            </Button>
+            <Button onClick={() => void auth.logout()} style={{ color: color.textDim }}>
               SIGN OUT
-            </button>
-            {syncState && (
-              <span style={{ fontFamily: theme.mono, fontSize: 11, color: theme.textDim }}>{syncState}</span>
-            )}
+            </Button>
+            {syncState && <Label>{syncState}</Label>}
           </div>
 
           <div>
-            <div style={{ fontFamily: theme.mono, fontSize: 11, color: theme.textDim, marginBottom: 6 }}>
-              MY SHARE LINKS ({shares.length})
+            <div style={{ marginBottom: 6 }}>
+              <Label>MY SHARE LINKS ({shares.length})</Label>
             </div>
             {shares.length === 0 ? (
-              <span style={{ fontFamily: theme.mono, fontSize: 11, color: theme.textDim }}>
-                None yet. Shares created while signed in appear here and can be revoked.
-              </span>
+              <Label>None yet. Shares created while signed in appear here and can be revoked.</Label>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                 {shares.map((s) => {
@@ -175,28 +146,35 @@ export function AccountPanel({
                     <div key={s.id} style={{ display: "flex", alignItems: "center", gap: 8 }}>
                       <span
                         style={{
-                          fontFamily: theme.mono, fontSize: 12, color: theme.text,
-                          flex: "1 1 auto", minWidth: 0,
-                          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                          fontFamily: font.mono,
+                          fontSize: typeScale.base,
+                          color: color.text,
+                          flex: "1 1 auto",
+                          minWidth: 0,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
                         }}
                         title={url}
                       >
                         {s.title}
                         {s.artist ? ` — ${s.artist}` : ""}
                       </span>
-                      <button
+                      <Button
+                        size="sm"
+                        variant="outline"
                         onClick={() => void navigator.clipboard.writeText(url).catch(() => undefined)}
-                        style={button}
                       >
                         COPY
-                      </button>
-                      <button
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="danger"
                         onClick={() => void revoke(s.id)}
-                        style={{ ...button, borderColor: "#7a2020", color: "#ffb0b0" }}
                         aria-label={`Revoke ${s.title}`}
                       >
                         REVOKE
-                      </button>
+                      </Button>
                     </div>
                   );
                 })}
@@ -205,6 +183,6 @@ export function AccountPanel({
           </div>
         </>
       )}
-    </div>
+    </Panel>
   );
 }

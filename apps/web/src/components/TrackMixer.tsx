@@ -1,38 +1,22 @@
-import { theme } from "../theme";
-import { toggleStyle } from "./Toolbar";
+import { Button, color, font, Label, Panel, typeScale } from "@cubscore/design";
 import type { AlphaTabController } from "../useAlphaTab";
 
 export function TrackMixer({ c }: { c: AlphaTabController }) {
   if (c.tracks.length === 0) return null;
 
   return (
-    <div
-      style={{
-        background: theme.panel,
-        border: `1px solid ${theme.border}`,
-        padding: 10,
-        marginBottom: 10,
-      }}
-    >
-      <div
-        style={{
-          fontFamily: theme.mono,
-          fontSize: 11,
-          color: theme.textDim,
-          letterSpacing: 0.5,
-          marginBottom: 8,
-        }}
-      >
-        TRACKS ({c.tracks.length})
+    <Panel style={{ marginBottom: 10 }}>
+      <div style={{ marginBottom: 8 }}>
+        <Label>TRACKS ({c.tracks.length})</Label>
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
         {c.tracks.map((t) => (
           <div key={t.index} style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <span
               style={{
-                fontFamily: theme.mono,
-                fontSize: 12,
-                color: t.muted ? theme.textDim : theme.text,
+                fontFamily: font.mono,
+                fontSize: typeScale.base,
+                color: t.muted ? color.textDim : color.text,
                 flex: "1 1 auto",
                 minWidth: 0,
                 overflow: "hidden",
@@ -49,26 +33,30 @@ export function TrackMixer({ c }: { c: AlphaTabController }) {
               step={0.05}
               value={t.volume}
               onChange={(e) => c.setTrackVolume(t.index, Number(e.target.value))}
-              style={{ width: 88, accentColor: theme.accent }}
+              style={{ width: 88, accentColor: color.accent }}
               aria-label={`${t.name} volume`}
             />
-            <button
+            <Button
+              size="sm"
               onClick={() => c.setTrackMuted(t.index, !t.muted)}
-              style={{ ...toggleStyle(t.muted), padding: "4px 10px" }}
+              active={t.muted}
               aria-pressed={t.muted}
+              style={{ padding: "4px 10px" }}
             >
               M
-            </button>
-            <button
+            </Button>
+            <Button
+              size="sm"
               onClick={() => c.setTrackSolo(t.index, !t.solo)}
-              style={{ ...toggleStyle(t.solo), padding: "4px 10px" }}
+              active={t.solo}
               aria-pressed={t.solo}
+              style={{ padding: "4px 10px" }}
             >
               S
-            </button>
+            </Button>
           </div>
         ))}
       </div>
-    </div>
+    </Panel>
   );
 }

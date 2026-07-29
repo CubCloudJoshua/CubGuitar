@@ -34,6 +34,7 @@ The semantic score model in `packages/core` is the source of truth for authored 
 
 - `packages/core` — semantic score model, operation log, op application, and the alphaTex serializer
 - `packages/formats` — alphaTab-model-to-core import, with a report of what the model cannot carry
+- `packages/design` — design tokens (UI-DESIGN.md) and the UI primitives every component is built from
 - `apps/web` — the React app
 - `services/api` — accounts, cloud library, and share links (Fastify, node:crypto scrypt, no auth dependencies). Storage is behind interfaces; the dev drivers write JSON to `services/api/data/`, production swaps in Postgres + object storage without touching routes
 - `services/sync` — realtime collaboration rooms over WebSocket (`ws`), ordering and broadcasting op batches

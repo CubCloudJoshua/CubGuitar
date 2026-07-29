@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { theme } from "../theme";
+import { Button, color, font, typeScale } from "@cubscore/design";
 import { exportGp, exportMidi, exportTex, printPdf } from "../export";
 import type { AlphaTabController } from "../useAlphaTab";
 
@@ -30,22 +30,9 @@ export function ExportMenu({ c }: { c: AlphaTabController }) {
 
   return (
     <div ref={wrapRef} style={{ position: "relative" }}>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        disabled={!c.score}
-        aria-expanded={open}
-        style={{
-          fontFamily: theme.mono,
-          fontSize: 12,
-          padding: "6px 12px",
-          border: `1px solid ${c.score ? theme.border : "#262626"}`,
-          background: theme.panelAlt,
-          color: c.score ? theme.text : theme.textDim,
-          cursor: c.score ? "pointer" : "default",
-        }}
-      >
+      <Button variant="ghost" onClick={() => setOpen((v) => !v)} disabled={!c.score} aria-expanded={open}>
         EXPORT ▾
-      </button>
+      </Button>
       {open && (
         <div
           style={{
@@ -53,8 +40,10 @@ export function ExportMenu({ c }: { c: AlphaTabController }) {
             top: "calc(100% + 4px)",
             right: 0,
             zIndex: 10,
-            background: theme.panelAlt,
-            border: `1px solid ${theme.border}`,
+            background: color.raisedHigh,
+            border: `1px solid ${color.hairline}`,
+            borderRadius: 8,
+            overflow: "hidden",
             minWidth: 180,
             display: "flex",
             flexDirection: "column",
@@ -65,14 +54,14 @@ export function ExportMenu({ c }: { c: AlphaTabController }) {
               key={label}
               onClick={() => run(fn)}
               style={{
-                fontFamily: theme.mono,
-                fontSize: 12,
+                fontFamily: font.mono,
+                fontSize: typeScale.base,
                 textAlign: "left",
                 padding: "8px 12px",
                 background: "transparent",
                 border: "none",
-                borderBottom: `1px solid ${theme.border}`,
-                color: theme.text,
+                borderBottom: `1px solid ${color.hairline}`,
+                color: color.text,
                 cursor: "pointer",
               }}
             >

@@ -15,7 +15,9 @@ import { ExportMenu } from "./components/ExportMenu";
 import { LibraryPanel } from "./library/LibraryPanel";
 import { AccountPanel } from "./auth/AccountPanel";
 import { ErrorBanner, ImportNoticeBanner, ShareLinkBar } from "./components/Banners";
-import { headerButton } from "./components/styles";
+import { Button, buttonStyle, color, font, Label, TextField, typeScale } from "@cubscore/design";
+
+const headerButton = buttonStyle("outline");
 
 export function App() {
   const c = useAlphaTab();
@@ -107,57 +109,52 @@ export function App() {
               SAVED — OPEN MY LIBRARY
             </a>
           ) : (
-            <button onClick={() => void shared.saveToLibrary()} style={headerButton} disabled={!c.score}>
+            <Button variant="outline" onClick={() => void shared.saveToLibrary()} disabled={!c.score}>
               SAVE TO MY LIBRARY
-            </button>
+            </Button>
           )
         )}
         <span style={{ flex: 1 }} />
         {!shared.active && narrow && (
-          <button onClick={() => lib.setLibraryOpen((v) => !v)} style={headerButton}>LIBRARY</button>
+          <Button variant="outline" onClick={() => lib.setLibraryOpen((v) => !v)}>LIBRARY</Button>
         )}
-        {!shared.active && <button onClick={lib.startNewScore} style={headerButton}>NEW</button>}
+        {!shared.active && <Button variant="outline" onClick={lib.startNewScore}>NEW</Button>}
         {!editing && canEditCurrent && (
-          <button onClick={lib.editImported} style={headerButton}>EDIT</button>
+          <Button variant="outline" onClick={lib.editImported}>EDIT</Button>
         )}
         {editing && (
-          <button onClick={() => lib.setMode("play")} style={headerButton}>PLAYER</button>
+          <Button variant="outline" onClick={() => lib.setMode("play")}>PLAYER</Button>
         )}
         {editing && collab.status === "off" && (
-          <button onClick={collab.start} style={headerButton}>COLLAB</button>
+          <Button variant="outline" onClick={collab.start}>COLLAB</Button>
         )}
         {collab.status === "live" && (
-          <button
+          <Button
+            variant="outline"
+            active
             onClick={collab.stop}
-            style={{ ...headerButton, background: theme.accent, color: theme.bg }}
             title="End the live session for this device"
           >
             LIVE · {collab.peers.length} — STOP
-          </button>
+          </Button>
         )}
         {canShare && (
-          <button
+          <Button
+            variant="outline"
             onClick={() => void shareLink.share(currentEntry)}
-            style={headerButton}
             disabled={shareLink.busy}
           >
             {shareLink.busy ? "SHARING…" : "SHARE"}
-          </button>
+          </Button>
         )}
         {!shared.active && (
-          <button onClick={() => fileInputRef.current?.click()} style={headerButton}>OPEN</button>
+          <Button variant="outline" onClick={() => fileInputRef.current?.click()}>OPEN</Button>
         )}
         <ExportMenu c={c} />
         {!shared.active && (
-          <button
-            onClick={() => setAccountOpen((v) => !v)}
-            style={{
-              ...headerButton,
-              ...(auth.user ? { background: theme.accent, color: theme.bg } : {}),
-            }}
-          >
+          <Button variant="outline" active={auth.user !== null} onClick={() => setAccountOpen((v) => !v)}>
             {auth.user ? auth.user.email.split("@")[0]?.toUpperCase() ?? "ACCOUNT" : "SIGN IN"}
-          </button>
+          </Button>
         )}
         <input
           ref={fileInputRef}
@@ -190,23 +187,19 @@ export function App() {
           }}
         >
           <span style={{ color: theme.accent, fontWeight: 700 }}>LIVE SESSION</span>
-          <input
+          <TextField
             readOnly
             value={collab.url}
             aria-label="Collab link"
             onFocus={(e) => e.target.select()}
-            style={{
-              flex: 1, minWidth: 160, fontFamily: theme.mono, fontSize: 12,
-              padding: "6px 8px", background: theme.bg,
-              border: `1px solid ${theme.border}`, color: theme.text,
-            }}
+            style={{ flex: 1, minWidth: 160 }}
           />
-          <button
+          <Button
+            variant="outline"
             onClick={() => void navigator.clipboard.writeText(collab.url ?? "").catch(() => undefined)}
-            style={headerButton}
           >
             COPY
-          </button>
+          </Button>
           <span style={{ color: theme.textDim }}>
             {collab.peers.length} in session
             {[...collab.cursors.values()]

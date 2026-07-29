@@ -23,6 +23,9 @@ importers:
       '@cubscore/core':
         specifier: workspace:*
         version: link:../../packages/core
+      '@cubscore/design':
+        specifier: workspace:*
+        version: link:../../packages/design
       '@cubscore/formats':
         specifier: workspace:*
         version: link:../../packages/formats
@@ -63,6 +66,18 @@ importers:
       vitest:
         specifier: ^4.1.10
         version: 4.1.10(@types/node@26.1.2)(vite@6.4.3(@types/node@26.1.2)(tsx@4.23.1))
+
+  packages/design:
+    devDependencies:
+      '@types/react':
+        specifier: ^18.3.0
+        version: 18.3.31
+      react:
+        specifier: ^18.3.0
+        version: 18.3.1
+      typescript:
+        specifier: ^5.6.0
+        version: 5.9.3
 
   packages/formats:
     dependencies:

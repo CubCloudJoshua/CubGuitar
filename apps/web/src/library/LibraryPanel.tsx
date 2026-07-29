@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { theme } from "../theme";
+import { Button, color, font, Label, Panel, TextField, typeScale } from "@cubscore/design";
 import type { LibraryEntry } from "./db";
 
 interface Props {
@@ -21,59 +21,27 @@ export function LibraryPanel({ entries, currentId, onOpen, onDelete, onImportCli
     : entries;
 
   return (
-    <aside
-      style={{
-        background: theme.panel,
-        border: `1px solid ${theme.border}`,
-        padding: 10,
-        display: "flex",
-        flexDirection: "column",
-        gap: 8,
-        minWidth: 0,
-      }}
-    >
+    <Panel as="aside" style={{ display: "flex", flexDirection: "column", gap: 8, minWidth: 0 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-        <span style={{ fontFamily: theme.mono, fontSize: 11, color: theme.textDim, letterSpacing: 0.5 }}>
-          LIBRARY ({entries.length})
-        </span>
+        <Label>LIBRARY ({entries.length})</Label>
         <span style={{ flex: 1 }} />
-        <button
-          onClick={onImportClick}
-          style={{
-            fontFamily: theme.mono,
-            fontSize: 11,
-            padding: "4px 10px",
-            border: `1px solid ${theme.accent}`,
-            background: "transparent",
-            color: theme.accent,
-            cursor: "pointer",
-          }}
-        >
+        <Button size="sm" variant="outline" onClick={onImportClick}>
           IMPORT
-        </button>
+        </Button>
       </div>
 
-      <input
+      <TextField
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Search"
         aria-label="Search library"
-        style={{
-          fontFamily: theme.mono,
-          fontSize: 12,
-          padding: "6px 8px",
-          background: theme.bg,
-          border: `1px solid ${theme.border}`,
-          color: theme.text,
-          minWidth: 0,
-        }}
       />
 
       <div style={{ display: "flex", flexDirection: "column", gap: 2, overflowY: "auto", maxHeight: "60vh" }}>
         {visible.length === 0 && (
-          <span style={{ fontFamily: theme.mono, fontSize: 11, color: theme.textDim, padding: "8px 0" }}>
+          <Label style={{ padding: "8px 0" }}>
             {entries.length === 0 ? "No scores yet. Import a file." : "No matches."}
-          </span>
+          </Label>
         )}
         {visible.map((entry) => {
           const active = entry.id === currentId;
@@ -84,8 +52,9 @@ export function LibraryPanel({ entries, currentId, onOpen, onDelete, onImportCli
                 display: "flex",
                 alignItems: "center",
                 gap: 6,
-                background: active ? theme.panelAlt : "transparent",
-                borderLeft: `2px solid ${active ? theme.accent : "transparent"}`,
+                background: active ? color.raisedHigh : "transparent",
+                borderLeft: `2px solid ${active ? color.accent : "transparent"}`,
+                borderRadius: 4,
                 padding: "6px 8px",
               }}
             >
@@ -100,14 +69,14 @@ export function LibraryPanel({ entries, currentId, onOpen, onDelete, onImportCli
                   border: "none",
                   padding: 0,
                   cursor: "pointer",
-                  fontFamily: theme.mono,
-                  color: active ? theme.accentBright : theme.text,
+                  fontFamily: font.mono,
+                  color: active ? color.accentLive : color.text,
                 }}
               >
                 <span
                   style={{
                     display: "block",
-                    fontSize: 12,
+                    fontSize: typeScale.base,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
@@ -115,31 +84,24 @@ export function LibraryPanel({ entries, currentId, onOpen, onDelete, onImportCli
                 >
                   {entry.title}
                 </span>
-                <span style={{ display: "block", fontSize: 10, color: theme.textDim }}>
+                <span style={{ display: "block", fontSize: typeScale.xs, color: color.textDim }}>
                   {entry.artist || "—"} · {entry.tracks} trk · {entry.bars} bars ·{" "}
                   {entry.format === "gp" ? "Guitar Pro" : "alphaTex"}
                 </span>
               </button>
-              <button
+              <Button
+                size="sm"
                 onClick={() => onDelete(entry.id)}
                 aria-label={`Delete ${entry.title}`}
                 title="Remove from library"
-                style={{
-                  background: "transparent",
-                  border: `1px solid ${theme.border}`,
-                  color: theme.textDim,
-                  fontFamily: theme.mono,
-                  fontSize: 11,
-                  padding: "2px 7px",
-                  cursor: "pointer",
-                }}
+                style={{ padding: "2px 7px", color: color.textDim }}
               >
                 ×
-              </button>
+              </Button>
             </div>
           );
         })}
       </div>
-    </aside>
+    </Panel>
   );
 }

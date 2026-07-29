@@ -1,21 +1,21 @@
+/**
+ * Compatibility shim over @cubscore/design tokens. New code imports the
+ * design package directly; this mapping keeps older call sites compiling
+ * while Phase A conversions land, and disappears with them.
+ */
+import { color, font, notation } from "@cubscore/design";
+
 export const theme = {
-  bg: "#080808",
-  panel: "#111111",
-  panelAlt: "#161616",
-  border: "#333333",
-  text: "#eeeeee",
-  textDim: "#888888",
-  accent: "#F07D00",
-  accentBright: "#FF9120",
-  mono: '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace',
+  bg: color.bg,
+  panel: color.raised,
+  panelAlt: color.raisedHigh,
+  border: color.border,
+  text: color.text,
+  textDim: color.textDim,
+  accent: color.accent,
+  accentBright: color.accentLive,
+  mono: font.mono,
 } as const;
 
-/** alphaTab render colors, tuned for the dark UI. */
-export const notationColors = {
-  mainGlyphColor: theme.text,
-  secondaryGlyphColor: theme.textDim,
-  staffLineColor: "#555555",
-  barSeparatorColor: "#555555",
-  barNumberColor: theme.accent,
-  scoreInfoColor: theme.text,
-};
+/** alphaTab render colors, from the design tokens. */
+export const notationColors = notation;

@@ -1,5 +1,5 @@
 import type { CSSProperties } from "react";
-import { theme } from "../theme";
+import { Button, buttonStyle, color, font, Label, typeScale, VDivider } from "@cubscore/design";
 import type { AlphaTabController } from "../useAlphaTab";
 
 const SPEED_PRESETS = [0.5, 0.75, 1];
@@ -12,20 +12,9 @@ function formatTime(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-const buttonBase: CSSProperties = {
-  fontFamily: theme.mono,
-  fontSize: 12,
-  padding: "6px 12px",
-  border: `1px solid ${theme.border}`,
-  background: theme.panelAlt,
-  color: theme.text,
-  cursor: "pointer",
-};
-
+/** Kept for callers still styling raw elements; new code uses <Button active>. */
 export function toggleStyle(active: boolean): CSSProperties {
-  return active
-    ? { ...buttonBase, background: theme.accent, color: theme.bg, borderColor: theme.accent, fontWeight: 700 }
-    : buttonBase;
+  return buttonStyle("ghost", active);
 }
 
 export function Toolbar({ c }: { c: AlphaTabController }) {
@@ -40,46 +29,41 @@ export function Toolbar({ c }: { c: AlphaTabController }) {
         gap: 8,
         alignItems: "center",
         padding: 10,
-        background: theme.panel,
-        border: `1px solid ${theme.border}`,
+        background: color.raised,
+        border: `1px solid ${color.hairline}`,
+        borderRadius: 8,
         marginBottom: 10,
       }}
     >
-      <button
-        onClick={c.playPause}
-        disabled={disabled}
-        style={{
-          ...buttonBase,
-          background: disabled ? "#333" : theme.accent,
-          color: disabled ? theme.textDim : theme.bg,
-          borderColor: disabled ? theme.border : theme.accent,
-          fontWeight: 700,
-          minWidth: 76,
-          cursor: disabled ? "default" : "pointer",
-        }}
-      >
+      <Button variant="solid" onClick={c.playPause} disabled={disabled} style={{ minWidth: 76 }}>
         {c.playing ? "PAUSE" : "PLAY"}
-      </button>
-      <button onClick={c.stop} disabled={disabled} style={buttonBase}>
+      </Button>
+      <Button variant="ghost" onClick={c.stop} disabled={disabled}>
         STOP
-      </button>
+      </Button>
 
-      <span style={{ fontFamily: theme.mono, fontSize: 12, color: theme.textDim, minWidth: 92 }}>
+      <span style={{ fontFamily: font.mono, fontSize: typeScale.base, color: color.textDim, minWidth: 92 }}>
         {formatTime(c.position.currentTime / 1000)} / {formatTime(c.position.endTime / 1000)}
       </span>
 
-      <div style={{ flex: "1 1 120px", height: 4, background: theme.border, minWidth: 80 }}>
-        <div style={{ width: `${Math.min(100, progress * 100)}%`, height: "100%", background: theme.accentBright }} />
+      <div style={{ flex: "1 1 120px", height: 4, background: color.border, minWidth: 80, borderRadius: 2 }}>
+        <div
+          style={{
+            width: `${Math.min(100, progress * 100)}%`,
+            height: "100%",
+            background: color.accentLive,
+            borderRadius: 2,
+          }}
+        />
       </div>
 
-      <Divider />
+      <VDivider />
 
-      {/* Speed trainer */}
-      <label style={labelStyle}>SPEED</label>
+      <Label>SPEED</Label>
       {SPEED_PRESETS.map((s) => (
-        <button key={s} onClick={() => c.setSpeed(s)} style={toggleStyle(Math.abs(c.speed - s) < 0.001)}>
+        <Button key={s} size="sm" onClick={() => c.setSpeed(s)} active={Math.abs(c.speed - s) < 0.001}>
           {s * 100}%
-        </button>
+        </Button>
       ))}
       <input
         type="range"
@@ -88,57 +72,47 @@ export function Toolbar({ c }: { c: AlphaTabController }) {
         step={0.05}
         value={c.speed}
         onChange={(e) => c.setSpeed(Number(e.target.value))}
-        style={{ width: 96, accentColor: theme.accent }}
+        style={{ width: 96, accentColor: color.accent }}
         aria-label="Playback speed"
       />
-      <span style={{ ...labelStyle, minWidth: 40, color: theme.text }}>{Math.round(c.speed * 100)}%</span>
+      <Label style={{ minWidth: 40, color: color.text }}>{Math.round(c.speed * 100)}%</Label>
 
-      <button
+      <Button
+        size="sm"
         onClick={() => c.setRamp({ ...c.ramp, enabled: !c.ramp.enabled })}
-        style={toggleStyle(c.ramp.enabled)}
+        active={c.ramp.enabled}
         title="Speed trainer: increase speed by 5% after each loop pass, up to 100%"
       >
         RAMP
-      </button>
+      </Button>
 
-      <Divider />
+      <VDivider />
 
-      <button onClick={c.toggleLoop} style={toggleStyle(c.loop)}>
+      <Button size="sm" onClick={c.toggleLoop} active={c.loop}>
         LOOP
-      </button>
+      </Button>
       {c.loopRange && (
-        <button onClick={c.clearLoopRange} style={buttonBase} title="Clear the selected loop region">
+        <Button size="sm" onClick={c.clearLoopRange} title="Clear the selected loop region">
           CLEAR SEL
-        </button>
+        </Button>
       )}
-      <button onClick={c.toggleMetronome} style={toggleStyle(c.metronome)}>
+      <Button size="sm" onClick={c.toggleMetronome} active={c.metronome}>
         CLICK
-      </button>
-      <button onClick={c.toggleCountIn} style={toggleStyle(c.countIn)}>
+      </Button>
+      <Button size="sm" onClick={c.toggleCountIn} active={c.countIn}>
         COUNT-IN
-      </button>
+      </Button>
 
-      <Divider />
+      <VDivider />
 
-      <label style={labelStyle}>ZOOM</label>
-      <button onClick={() => c.setZoom(Math.max(0.5, Math.round((c.zoom - 0.1) * 10) / 10))} style={buttonBase}>
+      <Label>ZOOM</Label>
+      <Button size="sm" onClick={() => c.setZoom(Math.max(0.5, Math.round((c.zoom - 0.1) * 10) / 10))}>
         −
-      </button>
-      <span style={{ ...labelStyle, minWidth: 40, color: theme.text }}>{Math.round(c.zoom * 100)}%</span>
-      <button onClick={() => c.setZoom(Math.min(2, Math.round((c.zoom + 0.1) * 10) / 10))} style={buttonBase}>
+      </Button>
+      <Label style={{ minWidth: 40, color: color.text }}>{Math.round(c.zoom * 100)}%</Label>
+      <Button size="sm" onClick={() => c.setZoom(Math.min(2, Math.round((c.zoom + 0.1) * 10) / 10))}>
         +
-      </button>
+      </Button>
     </div>
   );
-}
-
-const labelStyle: CSSProperties = {
-  fontFamily: theme.mono,
-  fontSize: 11,
-  color: theme.textDim,
-  letterSpacing: 0.5,
-};
-
-function Divider() {
-  return <span style={{ width: 1, height: 20, background: theme.border }} />;
 }
