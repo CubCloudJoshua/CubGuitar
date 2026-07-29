@@ -5,6 +5,14 @@
  * one along untouched branches. Applying the same op log to the same starting
  * document always yields the same result, which is what makes the log usable
  * for undo, version history, and sync.
+ *
+ * Load-bearing invariant: an op that changes nothing returns the *same
+ * reference*. Callers use identity to decide whether to bump the revision,
+ * push an undo snapshot, log the batch, or re-render, so an op that rebuilt an
+ * unchanged branch would inflate revisions (diverging between collaborators
+ * who receive a duplicate broadcast), add empty undo steps, and cause
+ * pointless re-renders. Every case below therefore compares before rebuilding.
+ * See convergence.test.ts.
  */
 import type { Bar, Beat, Note, Score, Track, Voice } from "./score.js";
 import type { Op, OpBatch } from "./ops.js";
@@ -67,10 +75,10 @@ function withNote(score: Score, noteId: string, fn: Mapper<Note>): Score {
 export function applyOp(score: Score, op: Op): Score {
   switch (op.type) {
     case "score.setTitle":
-      return { ...score, title: op.title };
+      return score.title === op.title ? score : { ...score, title: op.title };
 
     case "score.setArtist":
-      return { ...score, artist: op.artist };
+      return score.artist === op.artist ? score : { ...score, artist: op.artist };
 
     case "track.insert": {
       const tracks = [...score.tracks];
@@ -78,11 +86,15 @@ export function applyOp(score: Score, op: Op): Score {
       return { ...score, tracks };
     }
 
-    case "track.remove":
-      return { ...score, tracks: score.tracks.filter((t) => t.id !== op.trackId) };
+    case "track.remove": {
+      const tracks = score.tracks.filter((t) => t.id !== op.trackId);
+      return tracks.length === score.tracks.length ? score : { ...score, tracks };
+    }
 
     case "track.rename":
-      return mapTracks(score, (t) => (t.id === op.trackId ? { ...t, name: op.name } : t));
+      return mapTracks(score, (t) =>
+        t.id === op.trackId && t.name !== op.name ? { ...t, name: op.name } : t,
+      );
 
     case "bar.insert":
       return mapTracks(score, (t) => {
@@ -93,22 +105,31 @@ export function applyOp(score: Score, op: Op): Score {
       });
 
     case "bar.remove":
-      return mapTracks(score, (t) =>
-        t.id === op.trackId ? { ...t, bars: t.bars.filter((b) => b.id !== op.barId) } : t,
-      );
+      return mapTracks(score, (t) => {
+        if (t.id !== op.trackId) return t;
+        const bars = t.bars.filter((b) => b.id !== op.barId);
+        return bars.length === t.bars.length ? t : { ...t, bars };
+      });
 
     case "bar.setTempo":
       return mapBars(score, (b) => {
         if (b.id !== op.barId) return b;
         if (op.tempoBpm === null) {
+          if (b.tempoBpm === undefined) return b;
           const { tempoBpm, ...rest } = b;
           return rest;
         }
-        return { ...b, tempoBpm: op.tempoBpm };
+        return b.tempoBpm === op.tempoBpm ? b : { ...b, tempoBpm: op.tempoBpm };
       });
 
     case "bar.setTimeSignature":
-      return mapBars(score, (b) => (b.id === op.barId ? { ...b, timeSignature: op.timeSignature } : b));
+      return mapBars(score, (b) => {
+        if (b.id !== op.barId) return b;
+        const same =
+          b.timeSignature?.beats === op.timeSignature.beats &&
+          b.timeSignature?.beatValue === op.timeSignature.beatValue;
+        return same ? b : { ...b, timeSignature: op.timeSignature };
+      });
 
     case "beat.insert":
       return mapVoices(score, (v) => {
@@ -119,15 +140,22 @@ export function applyOp(score: Score, op: Op): Score {
       });
 
     case "beat.remove":
-      return mapVoices(score, (v) =>
-        v.id === op.voiceId ? { ...v, beats: v.beats.filter((b) => b.id !== op.beatId) } : v,
-      );
+      return mapVoices(score, (v) => {
+        if (v.id !== op.voiceId) return v;
+        const beats = v.beats.filter((b) => b.id !== op.beatId);
+        return beats.length === v.beats.length ? v : { ...v, beats };
+      });
 
     case "beat.setDuration":
-      return withBeat(score, op.beatId, (b) => ({ ...b, duration: op.duration }));
+      return withBeat(score, op.beatId, (b) =>
+        b.duration.numerator === op.duration.numerator &&
+        b.duration.denominator === op.duration.denominator
+          ? b
+          : { ...b, duration: op.duration },
+      );
 
     case "beat.setDots":
-      return withBeat(score, op.beatId, (b) => ({ ...b, dots: op.dots }));
+      return withBeat(score, op.beatId, (b) => (b.dots === op.dots ? b : { ...b, dots: op.dots }));
 
     case "note.insert":
       return withBeat(score, op.beatId, (b) => {
@@ -143,10 +171,12 @@ export function applyOp(score: Score, op: Op): Score {
       });
 
     case "note.setPitch":
-      return withNote(score, op.noteId, (n) => ({ ...n, pitch: op.pitch }));
+      return withNote(score, op.noteId, (n) => (n.pitch === op.pitch ? n : { ...n, pitch: op.pitch }));
 
     case "note.setFingering":
-      return withNote(score, op.noteId, (n) => ({ ...n, string: op.string, fret: op.fret }));
+      return withNote(score, op.noteId, (n) =>
+        n.string === op.string && n.fret === op.fret ? n : { ...n, string: op.string, fret: op.fret },
+      );
 
     case "note.addArticulation":
       return withNote(score, op.noteId, (n) =>
@@ -156,10 +186,11 @@ export function applyOp(score: Score, op: Op): Score {
       );
 
     case "note.removeArticulation":
-      return withNote(score, op.noteId, (n) => ({
-        ...n,
-        articulations: n.articulations.filter((a) => a !== op.articulation),
-      }));
+      return withNote(score, op.noteId, (n) =>
+        n.articulations.includes(op.articulation)
+          ? { ...n, articulations: n.articulations.filter((a) => a !== op.articulation) }
+          : n,
+      );
   }
 }
 
