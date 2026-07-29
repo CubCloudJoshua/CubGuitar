@@ -142,12 +142,12 @@ function report(results, fixtureCount, corpusCount) {
   const pad = (s, n) => String(s ?? "").padEnd(n);
   console.log("");
   console.log(
-    `${pad("SCORE", 34)}${pad("OK", 4)}${pad("TRK", 5)}${pad("BARS", 6)}${pad("NOTES", 7)}${pad("MS", 6)}TITLE`,
+    `${pad("SCORE", 36)}${pad("OK", 4)}${pad("TRK", 5)}${pad("BARS", 6)}${pad("NOTES", 7)}${pad("MS", 6)}TITLE`,
   );
   console.log("-".repeat(96));
   for (const r of results) {
     console.log(
-      `${pad(r.name, 34)}${pad(r.ok ? "yes" : "NO", 4)}${pad(r.tracks, 5)}${pad(r.bars, 6)}` +
+      `${pad(r.name, 36)}${pad(r.ok ? "yes" : "NO", 4)}${pad(r.tracks, 5)}${pad(r.bars, 6)}` +
         `${pad(r.notes, 7)}${pad(r.renderMs, 6)}${r.ok ? (r.title ?? "") : r.error}`,
     );
   }
@@ -181,14 +181,14 @@ function reportRoundTrips(trips) {
   console.log("");
   console.log("IMPORT ROUND TRIP (alphaTab -> core -> alphaTex -> alphaTab)");
   console.log(
-    `${pad("SCORE", 34)}${pad("OK", 4)}${pad("TRACKS", 8)}${pad("BARS", 8)}${pad("NOTES", 10)}${pad("PITCHES", 9)}LOSS`,
+    `${pad("SCORE", 36)}${pad("OK", 4)}${pad("TRACKS", 8)}${pad("BARS", 8)}${pad("NOTES", 10)}${pad("PITCHES", 9)}LOSS`,
   );
   console.log("-".repeat(100));
 
   let pitchProblems = 0;
   for (const t of trips) {
     if (!t.ok) {
-      console.log(`${pad(t.name, 34)}${pad("NO", 4)}${t.error}`);
+      console.log(`${pad(t.name, 36)}${pad("NO", 4)}${t.error}`);
       continue;
     }
     const o = t.original;
@@ -199,7 +199,7 @@ function reportRoundTrips(trips) {
     const clean = drift.missing.length === 0 && drift.added.length === 0;
     if (!clean) pitchProblems += 1;
     console.log(
-      `${pad(t.name, 34)}${pad("yes", 4)}${pad(cmp(o.tracks, c.tracks), 8)}` +
+      `${pad(t.name, 36)}${pad("yes", 4)}${pad(cmp(o.tracks, c.tracks), 8)}` +
         `${pad(cmp(o.bars, c.bars), 8)}${pad(cmp(o.notes, c.notes), 10)}` +
         `${pad(clean ? "exact" : "DRIFT", 9)}` +
         (lost === 0 ? "none" : `${lost} notes (drums)`),
