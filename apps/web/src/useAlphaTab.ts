@@ -27,6 +27,21 @@ export interface Position {
   endTime: number;
 }
 
+/**
+ * Where a bar was engraved, in the notation's own pixel coordinates.
+ *
+ * This is what lets controls sit on the music instead of in a panel above it:
+ * an overlay positioned from these can never drift from the bar it labels,
+ * because it is measured from the same render.
+ */
+export interface BarBox {
+  index: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** Speed trainer: each completed loop pass bumps speed by `step` up to `max`. */
 export interface RampConfig {
   enabled: boolean;
@@ -56,6 +71,7 @@ export function useAlphaTab() {
   const [countIn, setCountInState] = useState(false);
   const [zoom, setZoomState] = useState(1);
   const [ramp, setRampState] = useState<RampConfig>(DEFAULT_RAMP);
+  const [barBoxes, setBarBoxes] = useState<BarBox[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -103,8 +119,28 @@ export function useAlphaTab() {
       if (s.tracks.length > 1) api.renderTracks(s.tracks);
     });
 
-    api.renderStarted.on(() => setRendering(true));
-    api.postRenderFinished.on(() => setRendering(false));
+    api.renderStarted.on(() => {
+      setRendering(true);
+      // The old geometry describes a layout that is being replaced. Keeping it
+      // would leave overlays pinned to bars that have moved.
+      setBarBoxes([]);
+    });
+    api.postRenderFinished.on(() => {
+      setRendering(false);
+      const lookup = api.renderer.boundsLookup;
+      if (!lookup) return;
+      // One entry per master bar. A bar that appears in several staff systems
+      // cannot happen, but a multi-staff score reports the bar once per system
+      // with bounds spanning every staff, which is what an overlay wants.
+      const boxes: BarBox[] = [];
+      for (const system of lookup.staffSystems) {
+        for (const bar of system.bars) {
+          const b = bar.visualBounds;
+          boxes.push({ index: bar.index, x: b.x, y: b.y, width: b.w, height: b.h });
+        }
+      }
+      setBarBoxes(boxes);
+    });
     api.playerReady.on(() => setReady(true));
     api.error.on((e) => setError(e.message || String(e)));
 
@@ -249,6 +285,7 @@ export function useAlphaTab() {
     countIn,
     zoom,
     ramp,
+    barBoxes,
     error,
     loadTex,
     loadBytes,

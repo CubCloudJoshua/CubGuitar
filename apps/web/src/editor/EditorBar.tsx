@@ -14,7 +14,6 @@ import {
   font,
   Label,
   Popover,
-  SelectField,
   TextField,
   typeScale,
   VDivider,
@@ -144,16 +143,6 @@ function MetaField({
   );
 }
 
-/** Meter in force at the cursor's bar: the nearest signature at or before it. */
-function effectiveMeter(e: EditorController): { beats: number; beatValue: number } {
-  const bars = e.score.tracks[e.cursor.track]?.bars ?? [];
-  for (let i = Math.min(e.cursor.bar, bars.length - 1); i >= 0; i--) {
-    const ts = bars[i]?.timeSignature;
-    if (ts) return { beats: ts.beats, beatValue: ts.beatValue };
-  }
-  return { beats: 4, beatValue: 4 };
-}
-
 export function EditorBar({
   e,
   enabled,
@@ -168,7 +157,6 @@ export function EditorBar({
   const note = e.currentBeat?.notes.find((n) => n.string === e.cursor.string);
   const canUndo = allowHistory && e.canUndo;
   const canRedo = allowHistory && e.canRedo;
-  const meter = effectiveMeter(e);
 
   return (
     <div
@@ -242,41 +230,16 @@ export function EditorBar({
       </Popover>
 
       <VDivider />
+      {/* Tempo and meter are on the score now, as chips over the caret's bar
+          (UI-DESIGN.md). What is left here is the metadata that belongs to the
+          document rather than to any bar. */}
       <Popover label="SCORE ▾" width={244} buttonProps={{ size: "sm" }}>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <MetaField label="TITLE" value={e.score.title} onCommit={e.setTitle} />
           <MetaField label="ARTIST" value={e.score.artist} onCommit={e.setArtist} />
-          <MetaField
-            label="BPM"
-            value={String(e.score.tracks[0]?.bars[0]?.tempoBpm ?? 120)}
-            onCommit={(v) => e.setTempo(Number(v))}
-            width={70}
-          />
-          <div style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
-            <Label>METER</Label>
-            <span style={{ display: "flex", alignItems: "center", gap: 4 }}>
-              <SelectField
-                value={meter.beats}
-                onChange={(ev) => e.setTimeSignature(Number(ev.target.value), meter.beatValue)}
-                aria-label="Beats per bar"
-              >
-                {[2, 3, 4, 5, 6, 7, 9, 12].map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </SelectField>
-              <Label style={{ color: color.text }}>/</Label>
-              <SelectField
-                value={meter.beatValue}
-                onChange={(ev) => e.setTimeSignature(meter.beats, Number(ev.target.value))}
-                aria-label="Beat value"
-              >
-                {[2, 4, 8, 16].map((n) => (
-                  <option key={n} value={n}>{n}</option>
-                ))}
-              </SelectField>
-            </span>
-          </div>
-          <Label style={{ fontSize: typeScale.xs }}>Meter applies from the caret's bar onward.</Label>
+          <Label style={{ fontSize: typeScale.xs }}>
+            Tempo and meter are on the score: click ♩= or the time signature above the current bar.
+          </Label>
         </div>
       </Popover>
 

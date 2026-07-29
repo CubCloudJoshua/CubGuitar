@@ -1,10 +1,11 @@
 /**
  * Track management, tempo, and meter editing.
  *
- * Tempo and meter live behind the SCORE popover, so those checks open it —
- * which also exercises that it closes correctly after acting. Tracks are on the
- * instrument rail beside the score, one click each, and the rail is expected to
- * report which track the caret is in.
+ * Tempo and meter are chips on the score itself, positioned from the same
+ * render as the engraving, so these checks verify both that editing works and
+ * that the chips land inside the bar they label. Tracks are on the instrument
+ * rail beside the score, one click each, and the rail is expected to report
+ * which track the caret is in.
  */
 import { appReady, newDevice, scoreText } from "../harness.mjs";
 
@@ -16,9 +17,9 @@ async function openPopover(page, selector) {
   await page.waitForTimeout(400);
 }
 
-const SCORE_POPOVER = 'button:has-text("SCORE")';
 const MORE_POPOVER = 'button[aria-label="More articulations"]';
 const RAIL = 'nav[aria-label="Tracks"]';
+const SCORE_BOX = "main";
 
 export async function run({ browser, baseUrl, recorder }) {
   const { page } = await newDevice(browser, recorder, "tracks", { width: 1500, height: 1100 });
@@ -28,19 +29,69 @@ export async function run({ browser, baseUrl, recorder }) {
   await page.getByRole("button", { name: "NEW", exact: true }).click();
   await page.waitForTimeout(1000);
 
-  // Tempo, from the score popover, reaches the engraved score.
-  await openPopover(page, SCORE_POPOVER);
-  await page.getByLabel("Score bpm").fill("150");
-  await page.getByLabel("Score bpm").press("Enter");
-  await page.waitForTimeout(1400);
-  recorder.check("tempo change renders in the score", (await scoreText(page)).includes("= 150"));
+  // Tempo and meter are edited on the score itself, as chips over the caret's
+  // bar. They must be positioned from the same render as the engraving, so the
+  // first thing to check is that they land inside the bar they label.
+  const chipInBar = async () => {
+    const chip = await page.locator('[aria-label^="Time signature"]').first().boundingBox();
+    const frame = await page.locator(`${SCORE_BOX} div[aria-hidden="true"]`).first().boundingBox();
+    if (!chip || !frame) return null;
+    return (
+      chip.x >= frame.x - 2 &&
+      chip.x + chip.width <= frame.x + frame.width + 2 &&
+      chip.y >= frame.y - 2 &&
+      chip.y <= frame.y + frame.height
+    );
+  };
+  recorder.check("the caret's bar is framed in the score", (await chipInBar()) !== null);
+  recorder.check("the meter chip sits inside the bar it labels", (await chipInBar()) === true);
 
-  // Meter change from the caret's bar, in the same popover.
+  await page.locator('[aria-label^="Tempo"]').first().click();
+  await page.waitForTimeout(400);
+  await page.getByLabel("Tempo in beats per minute").fill("150");
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(1600);
+  recorder.check("tempo edited on the score reaches the engraving", (await scoreText(page)).includes("= 150"));
+  recorder.check(
+    "the tempo chip reads back the new tempo",
+    ((await page.locator('[aria-label^="Tempo"]').first().getAttribute("aria-label")) ?? "").includes("150"),
+  );
+
+  // Meter, from the chip on the same bar.
+  await page.locator('[aria-label^="Time signature"]').first().click();
+  await page.waitForTimeout(400);
   await page.getByLabel("Beats per bar").selectOption("3");
+  await page.waitForTimeout(1600);
+  recorder.check(
+    "meter edited on the score reaches the engraving",
+    (await scoreText(page)).includes("3"),
+  );
+  recorder.check(
+    "the meter chip reads back the new signature",
+    ((await page.locator('[aria-label^="Time signature"]').first().getAttribute("aria-label")) ?? "").includes("3/4"),
+  );
+
+  // Tempo belongs to the score, not to every bar, so it is only offered where
+  // the model actually keeps it.
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("ArrowRight");
   await page.waitForTimeout(1200);
-  recorder.equal("meter selection applies", await page.getByLabel("Beats per bar").inputValue(), "3");
-  await page.keyboard.press("Escape");
-  await page.waitForTimeout(300);
+  recorder.check(
+    "the caret left bar 1",
+    (await page.locator("text=/bar 2 · beat/").count()) === 1,
+  );
+  recorder.equal(
+    "the tempo chip is offered only on the bar that holds it",
+    await page.locator('[aria-label^="Tempo"]').count(),
+    0,
+  );
+  recorder.equal(
+    "the meter chip follows the caret to the new bar",
+    await page.locator('[aria-label^="Time signature"]').count(),
+    1,
+  );
 
   // The rail is present in the editor and lists the one track we have.
   recorder.check("the instrument rail is beside the score", (await page.locator(RAIL).count()) === 1);

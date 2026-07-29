@@ -10,6 +10,7 @@ import { useAuth } from "./auth/useAuth";
 import { collabIdFromLocation, useCollab } from "./collab/useCollab";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
+import { BarMarkings } from "./editor/BarMarkings";
 import { TransportPill } from "./components/TransportPill";
 import { ExportMenu } from "./components/ExportMenu";
 import { LibraryPanel } from "./library/LibraryPanel";
@@ -331,9 +332,12 @@ export function App() {
             />
           )}
           {/* The scroller is the score's own box: the rail must stay put when a
-              wide arrangement scrolls sideways. */}
-          <div style={{ flex: 1, minWidth: 0, overflowX: "auto" }}>
+              wide arrangement scrolls sideways. The markings overlay is inside
+              it and positioned relative to it, so it scrolls with the music it
+              labels instead of floating over a bar it does not belong to. */}
+          <div style={{ flex: 1, minWidth: 0, overflowX: "auto", position: "relative" }}>
             <div ref={c.hostRef} />
+            {editing && <BarMarkings e={editor} barBoxes={c.barBoxes} />}
           </div>
         </div>
       </main>
