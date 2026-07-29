@@ -11,7 +11,16 @@ export async function run({ browser, baseUrl, recorder }) {
 
   // Open, filter, and run a command by keyboard alone.
   await openPalette(page);
-  recorder.check("Cmd+K opens the palette", true);
+  // openPalette waits for the input, so it throws if the palette never appeared;
+  // this used to assert `true`, which could not fail. What is worth checking is
+  // that the input holds focus, because a palette you have to click into first
+  // is not a keyboard-first palette — and a focus race here has broken before.
+  recorder.check(
+    "Cmd+K opens the palette with the search focused",
+    await page.evaluate(
+      () => document.activeElement?.getAttribute("aria-label") === "Command search",
+    ),
+  );
   await page.keyboard.type("new sco", { delay: 30 });
   await page.waitForTimeout(300);
   await page.keyboard.press("Enter");

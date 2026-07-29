@@ -17,7 +17,14 @@ export async function run({ browser, baseUrl, recorder }) {
   await a.page.getByLabel("Password").fill(password);
   await a.page.getByRole("button", { name: "CREATE ACCOUNT" }).click();
   await a.page.waitForSelector("text=SYNC LIBRARY", { timeout: 20_000 });
-  recorder.check("registration signs the user in", true);
+  // Asserted against the API, not against `true`. The waitForSelector above
+  // already throws if registration fails, so this used to be a hard-coded pass
+  // dressed as a check — it could never fail and told a reader nothing.
+  const me = await a.page.evaluate(async () => {
+    const response = await fetch("/api/auth/me");
+    return response.ok ? await response.json() : null;
+  });
+  recorder.equal("registration signs the user in", me?.user?.email, email);
   recorder.check("header shows the account", (await a.page.locator("header").innerText()).includes("E2E+"));
 
   // The session cookie is shared across tabs of the same device.

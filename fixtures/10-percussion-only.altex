@@ -1,0 +1,9 @@
+\title "Percussion Only"
+\artist "CubScore"
+\tempo 100
+.
+\track "Kit"
+\instrument percussion
+\articulation defaults
+"Kick (hit)".4 "Snare (hit)".4 "Kick (hit)".4 "Snare (hit)".4 |
+"Kick (hit)".8 "Kick (hit)".8 "Snare (hit)".4 "Kick (hit)".4 "Snare (hit)".4

@@ -25,6 +25,8 @@ Imported Guitar Pro files are editable, and editing one never costs you the file
 
 An import is converted to the semantic model, and pressing EDIT opens it with a report of anything the model could not carry. Multiple voices per bar and ties survive the conversion and round-trip exactly. Percussion is the notable gap — drum tracks play faithfully in the player but are dropped from the editable version rather than converted into notation that would be wrong. Alternate endings, chord diagrams, section markers, and detailed bend curves are reported the same way.
 
+A file with nothing CubScore can edit — a drum-only transcription, since percussion is not in the model yet — stays play-only and says so in the player. It used to offer EDIT and then hand you a blank guitar staff where your music had been.
+
 Staves with no strings — a piano or vocal part — are carried pitch-exact and are not reported as lost, because they are not. They are read-only in the editor: fret entry needs a tuning to turn a digit into a pitch, and there is none, so the editor refuses rather than inventing notes. `fixtures/09-pitched-staff.altex` guards the round trip and `e2e/suites/pitched-staff.mjs` guards the refusal.
 
 The op log is replayed for real now: a live session's whole history is what a late joiner is handed, and `packages/core/src/session.ts` rebuilds the document from it on every acknowledgement. Undo is still document snapshots rather than inverse operations, which is why it is disabled during a live session — collaborative undo needs inverse ops broadcast to the room, and that has not been built.
@@ -56,7 +58,7 @@ pnpm api        # start the accounts/library/share API on :8787
 pnpm sync       # start the realtime collaboration service on :8788
 pnpm dev        # start the web app (proxies /api and /ws)
 pnpm build      # typecheck and build everything
-pnpm test       # unit tests (packages/core, services/api)
+pnpm test       # unit tests (packages/core, packages/formats, services/api)
 pnpm corpus     # load and render every score in fixtures/ and corpus/
 pnpm audio      # synthesize every score to samples and confirm it makes sound
 pnpm e2e        # drive the built app in a browser across ten journeys

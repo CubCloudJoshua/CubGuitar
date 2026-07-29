@@ -111,8 +111,17 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       if (parsed) {
         try {
           const converted = fromAlphaTab(parsed);
-          core = JSON.stringify(converted.score);
           report = JSON.stringify(converted.report);
+          // No editable tracks means there is nothing to edit — a drum-only
+          // transcription is the realistic case, since percussion is not in the
+          // model yet. Storing a core anyway made EDIT available and then handed
+          // the user a blank guitar staff where their music had been, because the
+          // serializer substitutes a default track for an empty score. The file
+          // still plays, and the notice explains what was dropped.
+          if (converted.score.tracks.length > 0) core = JSON.stringify(converted.score);
+          // Nothing editable, so the user will never press EDIT and never see the
+          // notice that explains why. Say it now, in the player.
+          else if (converted.report.unsupported.length > 0) setImportNotice(converted.report);
         } catch (err) {
           // A failed conversion must not lose the import: the file still
           // plays, it just stays read-only.

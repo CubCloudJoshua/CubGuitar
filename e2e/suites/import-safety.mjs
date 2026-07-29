@@ -99,7 +99,16 @@ export async function run({ browser, baseUrl, recorder }) {
     // preserving them worth anything.
     await runCommand(page, "Show imported original");
     await settle(3500);
-    recorder.check("original renders again", (await scoreText(page)).length > 0);
+    // The 9 typed above is the one thing that tells the original apart from the
+    // edit. Checking that *something* rendered passed whichever one appeared,
+    // which is exactly the confusion this command exists to resolve.
+    const original = await scoreText(page);
+    recorder.check("the original renders", original.length > 0);
+    recorder.check(
+      "what renders is the original, not the edit",
+      !original.includes("9"),
+      original.slice(0, 90),
+    );
     recorder.check(
       "the original is play-only, with EDIT offered to resume",
       (await page.getByRole("button", { name: "EDIT", exact: true }).count()) === 1,

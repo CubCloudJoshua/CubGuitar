@@ -359,7 +359,10 @@ export function App() {
       {editing && !performing && (
         <EditorBar e={editor} enabled={editing && !performing} allowHistory={collab.status !== "live"} />
       )}
-      {editing && !performing && lib.importNotice && lib.importNotice.unsupported.length > 0 && (
+      {/* Also shown in the player, for an import that converted to nothing
+          editable: that user never presses EDIT, so gating this on the editor
+          meant they were never told why their file is play-only. */}
+      {!performing && lib.importNotice && lib.importNotice.unsupported.length > 0 && (
         <ImportNoticeBanner notice={lib.importNotice} onDismiss={() => lib.setImportNotice(null)} />
       )}
 
