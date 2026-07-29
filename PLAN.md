@@ -148,7 +148,11 @@ Every edit is an operation in a log. That single choice gives us undo, autosave,
 
 ## 5. Roadmap
 
-**Status, July 2026.** Phase 0 complete except real-file corpus testing (the harness exists and enforces pitch-exact import fidelity; it needs real .gp files). Phase 1 functionally complete: player, local-first library, accounts, cloud library sync, revocable share links with save-to-library for recipients, exports (.gp/alphaTex/MIDI/print), responsive to phone width. Landed early from Phase 2: the op-log editor on the semantic model, .gp export, and editable imports. Billing rails, email verification, and the Phase 1 exit polish remain.
+**Status, July 2026.** Phase 0 complete: the corpus harness enforces pitch-exact import fidelity across eight original fixtures and real Guitar Pro transcriptions (Led Zeppelin .gp3 files, 270+ bars, 8k+ notes), including alternate tunings, capos, 32nd runs, and 5:4 tuplets. Phase 1 functionally complete: player, local-first library, accounts, cloud library sync, revocable share links with save-to-library for recipients, exports (.gp/alphaTex/MIDI/print), verified function at phone width. Landed early from Phase 2: the op-log editor on the semantic model, .gp export, and editable imports. Landed early from Phase 4: realtime collaboration with presence and verified convergence.
+
+Quality gates in CI on every push: unit tests including the convergence contract the collaboration feature rests on, the corpus fidelity suite, and seven browser-driven end-to-end journeys. See UI-DESIGN.md for the interface overhaul's phase status.
+
+Billing rails, email verification, collaborative undo, offline CRDT merge, and every AI feature remain.
 
 ### Phase 0: Foundations (weeks 1 to 4)
 - Monorepo, CI, deploy pipeline to CubCloud infra.
