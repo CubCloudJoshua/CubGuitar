@@ -46,6 +46,15 @@ export async function run({ browser, baseUrl, recorder }) {
     copiedShown !== copyOffered,
     `copied=${copiedShown} button=${copyOffered}`,
   );
+  // Whether the link reached the clipboard is the outcome of pressing SHARE, so
+  // it has to reach someone who cannot see the colour of a three-letter label.
+  recorder.check(
+    "the outcome is announced, not only shown",
+    await teacher.page.evaluate(() => {
+      const live = document.querySelector('[role="status"]');
+      return (live?.textContent ?? "").length > 0;
+    }),
+  );
   if (copiedShown) {
     recorder.check(
       "the link really is on the clipboard",

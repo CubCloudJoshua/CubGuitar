@@ -314,7 +314,7 @@ export function App() {
         />
       </header>
 
-      {accountOpen && !shared.active && (
+      {accountOpen && !shared.active && !performing && (
         <AccountPanel
           auth={auth}
           onLibraryChanged={() => void lib.refresh()}
@@ -323,8 +323,11 @@ export function App() {
       )}
 
       {shareLink.url && !performing && <ShareCard url={shareLink.url} onDismiss={shareLink.dismiss} />}
-      {collab.status === "live" && collab.url && (
+      {collab.status === "live" && collab.url && !performing && (
         <div
+          // A session going live, and people joining or leaving it, is state a
+          // sighted user reads off this banner and nobody else was told about.
+          role="status"
           style={{
             display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8,
             background: color.raised, border: `1px solid ${color.accent}`, borderRadius: 8,
@@ -353,8 +356,8 @@ export function App() {
           </span>
         </div>
       )}
-      {collab.error && <ErrorBanner message={collab.error} />}
-      {error && <ErrorBanner message={error} />}
+      {collab.error && !performing && <ErrorBanner message={collab.error} />}
+      {error && !performing && <ErrorBanner message={error} />}
 
       {editing && !performing && (
         <EditorBar e={editor} enabled={editing && !performing} allowHistory={collab.status !== "live"} />

@@ -89,6 +89,14 @@ export async function run({ browser, baseUrl, recorder }) {
     "nothing overflows sideways",
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
   );
+  // The mode exists to have no chrome, and several shell panels were not gated
+  // on it, so a live collab banner, the account panel or an error banner would
+  // have appeared on stage.
+  recorder.equal(
+    "no shell panel leaks onto the stage",
+    await page.evaluate(() => document.querySelectorAll('[role="status"], [role="alert"]').length),
+    0,
+  );
 
   // A page turn has to move a bounded scroller, not grow the page.
   const before = await scrollState(page);

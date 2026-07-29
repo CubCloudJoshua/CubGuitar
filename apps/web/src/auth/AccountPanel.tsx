@@ -129,7 +129,11 @@ export function AccountPanel({
             <Button onClick={() => void auth.logout()} style={{ color: color.textDim }}>
               SIGN OUT
             </Button>
-            {syncState && <Label>{syncState}</Label>}
+            {/* Whether a sync succeeded, and what it moved, is the answer to the
+                button the user just pressed — so it is announced, not only
+                shown. This is also where a refused cross-account sync explains
+                itself. */}
+            <span role="status">{syncState && <Label>{syncState}</Label>}</span>
           </div>
 
           <div>

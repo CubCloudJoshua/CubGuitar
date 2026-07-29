@@ -18,6 +18,7 @@ Phase 1 functionally complete, Phase 2 under way, and realtime collaboration lan
 - **Export** — Guitar Pro `.gp`, alphaTex, MIDI, and print/PDF.
 - **Perform mode** — PERFORM switches to a stage view: true black, engraving at full white, notation 40% larger, a position readout readable across a room, page turns on tap zones a fifth of the screen wide or on PageUp/PageDown for a foot pedal, and a setlist filmstrip that hides while the music plays. Playback turns the pages itself, keeping the playing bar high in the frame so you are reading ahead of the beat rather than at it. Escape leaves and puts everything back. The stage palette doubles as a high-contrast theme.
 - **Responsive** — full controls down to phone width.
+- **Keyboard and screen readers** — every action is in the command palette, controls keep their own key handling (the editor's shortcuts step aside for whatever has focus), a closed drawer is inert rather than an invisible row of tab stops, and state changes that used to be conveyed by colour alone — a copied link, a sync result, a live session, an error — are announced.
 
 Not built yet: offline collaboration merge (CRDT), collaborative undo, email verification and password reset, and all AI features.
 

@@ -4,6 +4,12 @@ import type { ImportReport } from "@cubscore/formats";
 export function ErrorBanner({ message }: { message: string }) {
   return (
     <div
+      // Announced. Nothing in this app was exposed to a screen reader, so a
+      // failed import, a dead share link or a lost collab connection simply
+      // appeared on screen and was never spoken. An error is worth interrupting
+      // for, which is what alert means; the notice below is not, which is why it
+      // is only status.
+      role="alert"
       style={{
         background: color.dangerBg,
         border: `1px solid ${color.dangerBorder}`,
@@ -30,6 +36,7 @@ export function ImportNoticeBanner({
 }) {
   return (
     <div
+      role="status"
       style={{
         background: color.noticeBg,
         border: `1px solid ${color.accent}`,

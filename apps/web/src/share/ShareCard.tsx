@@ -192,7 +192,13 @@ export function ShareCard({ url, onDismiss }: { url: string; onDismiss: () => vo
           ×
         </Button>
       </div>
-      <span style={{ flexBasis: "100%", fontFamily: font.mono, fontSize: typeScale.xs, color: color.textDim }}>
+      {/* Whether the link reached the clipboard is the whole outcome of pressing
+          SHARE, and it was only ever communicated by a colour change on a
+          three-letter label. */}
+      <span
+        role="status"
+        style={{ flexBasis: "100%", fontFamily: font.mono, fontSize: typeScale.xs, color: color.textDim }}
+      >
         {copied === true
           ? "On your clipboard. The recipient gets a read-only player with the practice tools, nothing to install."
           : "The recipient gets a read-only player with the practice tools, nothing to install."}
