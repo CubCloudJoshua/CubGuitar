@@ -114,4 +114,32 @@ export async function run({ browser, baseUrl, recorder }) {
     scoreScrolls !== null && scoreScrolls.overflowX === "auto",
     JSON.stringify(scoreScrolls),
   );
+
+  // Reduced motion is a stated design commitment, and components set their
+  // transitions inline, so only the global override can honour it.
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.reload({ waitUntil: "networkidle" });
+  await appReady(page);
+  const durations = await page.evaluate(() => {
+    const header = document.querySelector("header");
+    const drawer = document.querySelector('div[role="dialog"][aria-label="Library"]');
+    const read = (el) => (el ? getComputedStyle(el).transitionDuration : null);
+    return { header: read(header), drawer: read(drawer) };
+  });
+  // transitionDuration can list several values; every one must be effectively
+  // instant. Absent (null) means the element has no transition to suppress.
+  const isInstant = (value) =>
+    value === null ||
+    value.split(",").every((part) => Number.parseFloat(part) <= 0.001 || Number.isNaN(Number.parseFloat(part)));
+  recorder.check(
+    "header transition is suppressed under reduced motion",
+    isInstant(durations.header),
+    String(durations.header),
+  );
+  recorder.check(
+    "drawer transition is suppressed under reduced motion",
+    isInstant(durations.drawer),
+    String(durations.drawer),
+  );
+  await page.emulateMedia({ reducedMotion: null });
 }

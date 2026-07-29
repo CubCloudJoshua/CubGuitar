@@ -14,6 +14,28 @@
         color: #eee;
         font-family: "IBM Plex Mono", ui-monospace, monospace;
       }
+      /* Focus must stay visible for keyboard users even though mouse clicks
+         release focus so the spacebar keeps driving the transport. */
+      :focus-visible {
+        outline: 2px solid #ff9120;
+        outline-offset: 1px;
+      }
+      /*
+        UI-DESIGN.md: motion explains, never decorates, and the preference is
+        honored fully. Components style transitions inline, so only !important
+        under this query can override them; near-zero rather than zero keeps
+        transitionend/animationend listeners firing.
+      */
+      @media (prefers-reduced-motion: reduce) {
+        *,
+        *::before,
+        *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
     </style>
   </head>
   <body>
