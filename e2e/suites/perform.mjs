@@ -97,6 +97,32 @@ export async function run({ browser, baseUrl, recorder }) {
   await settle(1200);
   recorder.equal("PageUp turns it back", (await scrollState(page))?.top, 0);
 
+  // Picking from the setlist must not drop the user into the editor. Perform
+  // hides every editing control, so an authored score opening in edit mode
+  // would mean typing frets with no visible tools and landing in the editor on
+  // the way out.
+  await page.keyboard.press("Escape");
+  await settle(2000);
+  await page.getByRole("button", { name: "NEW", exact: true }).click();
+  await settle(1200);
+  await page.keyboard.press("Digit5");
+  await settle(2500);
+  await page.getByRole("button", { name: "PERFORM", exact: true }).click();
+  await settle(2500);
+  const authored = page.locator('[aria-label^="Play New Score"]').first();
+  recorder.check("an authored score is offered in the setlist", (await authored.count()) === 1);
+  await authored.click();
+  await settle(3000);
+  recorder.equal(
+    "the setlist keeps the editor closed",
+    await page.getByRole("button", { name: "Leave perform mode" }).count(),
+    1,
+  );
+  recorder.check(
+    "the authored score actually renders on the stage",
+    (await page.locator(".at-surface svg").count()) > 0,
+  );
+
   // Escape leaves, and everything it changed is put back.
   await page.keyboard.press("Escape");
   await settle(2500);
@@ -106,6 +132,13 @@ export async function run({ browser, baseUrl, recorder }) {
     0,
   );
   recorder.equal("the header is back", await page.locator("header").evaluate((el) => getComputedStyle(el).display), "flex");
+  // The real proof that the setlist did not open the editor: PLAYER only exists
+  // while editing, so its absence here means the app is in the player.
+  recorder.equal(
+    "leaving after a setlist pick lands in the player, not the editor",
+    await page.getByRole("button", { name: "PLAYER", exact: true }).count(),
+    0,
+  );
   recorder.equal("the engraving palette is restored", await glyphFill(page), deskFill);
   recorder.check(
     "the library still works after a round trip",

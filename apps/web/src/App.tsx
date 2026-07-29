@@ -442,7 +442,7 @@ export function App() {
             <Setlist
               entries={lib.entries}
               currentId={lib.currentId}
-              onOpen={(entry) => void lib.openEntry(entry)}
+              onOpen={(entry) => void lib.openEntry(entry, { playerOnly: true })}
             />
           )}
         </>

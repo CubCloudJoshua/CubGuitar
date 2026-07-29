@@ -263,9 +263,12 @@ export function usePerformShell({
 
   // Bigger notation, because "maximum width" on stage means legible at
   // instrument distance rather than merely edge to edge. The zoom the user had
-  // is restored on the way out; captured in a ref so changing it inside the
-  // mode does not re-run the effect and fight itself.
+  // is restored on the way out; held in a ref so raising it inside the mode
+  // does not re-run the effect and fight itself. Tracked while outside the mode
+  // rather than captured once, or entering would restore whatever zoom the app
+  // started with instead of the one the user had just set.
   const zoomOnEntry = useRef(zoom);
+  if (!active) zoomOnEntry.current = zoom;
   useEffect(() => {
     if (!active) return;
     const previous = zoomOnEntry.current;

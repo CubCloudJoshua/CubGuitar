@@ -4,7 +4,7 @@
  * consequences of library actions (open, import, new, edit-imported).
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Score as CoreScore } from "@cubscore/core";
+import { toAlphaTex, type Score as CoreScore } from "@cubscore/core";
 import { fromAlphaTab, type ImportReport } from "@cubscore/formats";
 import type { AlphaTabController } from "../useAlphaTab";
 import type { EditorController } from "../editor/useEditor";
@@ -346,15 +346,23 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     [flushSave, loadTex, loadBytes],
   );
 
+  /**
+   * Opens a library entry.
+   *
+   * `playerOnly` forces the player even for a score authored here. Perform
+   * mode's setlist needs it: an authored score would otherwise open in the
+   * editor, and Perform hides every editing control, so the user would be
+   * typing frets they cannot see the tools for and land in the editor on exit.
+   */
   const openEntry = useCallback(
-    async (row: LibraryEntry) => {
+    async (row: LibraryEntry, { playerOnly = false }: { playerOnly?: boolean } = {}) => {
       // Awaited, and then re-read: reopening the row that is currently being
       // edited would otherwise load the pre-flush copy and write it back.
       await flushSave();
       const entry = (await getEntry(row.id)) ?? row;
       setCurrentId(entry.id);
       setImportNotice(null);
-      if (entry.authored && entry.core) {
+      if (entry.authored && entry.core && !playerOnly) {
         // Authored here, so it reopens in the editor.
         editor.loadScore(JSON.parse(entry.core) as CoreScore);
         savedTexRef.current = AWAIT_BASELINE;
@@ -362,10 +370,14 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
         setMode("edit");
       } else {
         // Imported files open in the player, where alphaTab renders the
-        // original faithfully. Editing is an explicit step.
+        // original faithfully. Editing is an explicit step. The original bytes
+        // win over the projection for exactly that reason, and the projection is
+        // the last resort so a score with nothing but a core model still plays
+        // rather than opening an empty player.
         setMode("play");
         if (entry.tex !== null) loadTex(entry.tex);
         else if (entry.bytes) loadBytes(entry.bytes);
+        else if (entry.core) loadTex(toAlphaTex(JSON.parse(entry.core) as CoreScore));
       }
       await putEntry({ ...entry, openedAt: Date.now() });
       await refresh();
