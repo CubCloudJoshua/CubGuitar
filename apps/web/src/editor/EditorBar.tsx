@@ -143,6 +143,25 @@ const labelStyle = {
   letterSpacing: 0.5,
 } as const;
 
+const selectStyle = {
+  fontFamily: theme.mono,
+  fontSize: 12,
+  padding: "5px 6px",
+  background: theme.bg,
+  border: `1px solid ${theme.border}`,
+  color: theme.text,
+} as const;
+
+/** Meter in force at the cursor's bar: the nearest signature at or before it. */
+function effectiveMeter(e: EditorController): { beats: number; beatValue: number } {
+  const bars = e.score.tracks[e.cursor.track]?.bars ?? [];
+  for (let i = Math.min(e.cursor.bar, bars.length - 1); i >= 0; i--) {
+    const ts = bars[i]?.timeSignature;
+    if (ts) return { beats: ts.beats, beatValue: ts.beatValue };
+  }
+  return { beats: 4, beatValue: 4 };
+}
+
 export function EditorBar({
   e,
   enabled,
@@ -182,6 +201,64 @@ export function EditorBar({
       <Divider />
       <MetaField label="TITLE" value={e.score.title} onCommit={e.setTitle} />
       <MetaField label="ARTIST" value={e.score.artist} onCommit={e.setArtist} />
+
+      <Divider />
+      <label style={labelStyle}>TRACK</label>
+      <select
+        value={e.cursor.track}
+        onChange={(ev) => e.selectTrack(Number(ev.target.value))}
+        aria-label="Active track"
+        style={selectStyle}
+      >
+        {e.score.tracks.map((t, i) => (
+          <option key={t.id} value={i}>
+            {t.name}
+          </option>
+        ))}
+      </select>
+      <button onClick={() => e.addTrack("guitar")} style={btn} title="Add a standard-tuned guitar track">
+        +GTR
+      </button>
+      <button onClick={() => e.addTrack("bass")} style={btn} title="Add a standard-tuned bass track">
+        +BASS
+      </button>
+      <button
+        onClick={e.removeTrack}
+        style={{ ...btn, opacity: e.score.tracks.length > 1 ? 1 : 0.4 }}
+        disabled={e.score.tracks.length <= 1}
+        title="Remove the active track"
+      >
+        ✕TRK
+      </button>
+
+      <Divider />
+      <MetaField
+        label="BPM"
+        value={String(e.score.tracks[0]?.bars[0]?.tempoBpm ?? 120)}
+        onCommit={(v) => e.setTempo(Number(v))}
+      />
+      <label style={labelStyle}>METER</label>
+      <select
+        value={effectiveMeter(e).beats}
+        onChange={(ev) => e.setTimeSignature(Number(ev.target.value), effectiveMeter(e).beatValue)}
+        aria-label="Beats per bar"
+        style={selectStyle}
+      >
+        {[2, 3, 4, 5, 6, 7, 9, 12].map((n) => (
+          <option key={n} value={n}>{n}</option>
+        ))}
+      </select>
+      <span style={{ ...labelStyle, color: theme.text }}>/</span>
+      <select
+        value={effectiveMeter(e).beatValue}
+        onChange={(ev) => e.setTimeSignature(effectiveMeter(e).beats, Number(ev.target.value))}
+        aria-label="Beat value"
+        style={selectStyle}
+      >
+        {[2, 4, 8, 16].map((n) => (
+          <option key={n} value={n}>{n}</option>
+        ))}
+      </select>
 
       <Divider />
       <span style={label}>NOTE</span>
