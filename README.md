@@ -6,7 +6,7 @@ See [PLAN.md](./PLAN.md) for the full product plan. The repo keeps the original 
 
 ## Status
 
-Phase 1 mostly done, Phase 2 started. Working today:
+Phase 1 functionally complete, Phase 2 under way, and realtime collaboration landed early from Phase 4. Working today:
 
 - **Editor** — fret entry on a semantic score model with a full operation log. Type `0`-`9` for frets (two digits combine into 10-24 the way Guitar Pro does), arrows to move the caret, `+`/`-` for beats, `Enter` for a bar, `Ctrl+Z`/`Ctrl+Shift+Z` for undo and redo, plus durations, dots, and articulations. Tracks are an instrument rail beside the score; tempo and meter are chips on the caret's bar, which is framed in the score so you can see where you are. Work autosaves to the library and reopens in the editor.
 - **Player** — multitrack notation and tablature rendering with playback, a scrubbable position bar and a play control that wears the progress as a ring, click-to-seek, drag-to-select loop regions, speed trainer (presets, slider, and a ramp mode that raises speed after each loop pass), metronome, count-in, zoom, and a per-track mixer with mute, solo, and volume.
@@ -25,7 +25,7 @@ Imported Guitar Pro files are editable, and editing one never costs you the file
 
 An import is converted to the semantic model, and pressing EDIT opens it with a report of anything the model could not carry. Multiple voices per bar and ties survive the conversion and round-trip exactly. Percussion is the notable gap — drum tracks play faithfully in the player but are dropped from the editable version rather than converted into notation that would be wrong. Alternate endings, chord diagrams, section markers, and detailed bend curves are reported the same way.
 
-Undo uses document snapshots rather than inverse operations; the op log is recorded but not yet replayed, which is the work that lands with sync.
+The op log is replayed for real now: a live session's whole history is what a late joiner is handed, and `packages/core/src/session.ts` rebuilds the document from it on every acknowledgement. Undo is still document snapshots rather than inverse operations, which is why it is disabled during a live session — collaborative undo needs inverse ops broadcast to the room, and that has not been built.
 
 Rendering and playback come from [alphaTab](https://github.com/CoderLine/alphaTab); PLAN.md Phase 2 replaces it with our own engine. Its license needs a legal check before launch.
 
