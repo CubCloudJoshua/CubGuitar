@@ -54,6 +54,8 @@ export function useEditor() {
   /** The op log. Undo uses snapshots today; the log is what sync will replay. */
   const logRef = useRef<OpBatch[]>([]);
   const digitRef = useRef<{ value: number; at: number } | null>(null);
+  /** Collab tap: every locally committed batch is handed to this listener. */
+  const commitListenerRef = useRef<((batch: OpBatch) => void) | null>(null);
 
   const track = score.tracks[cursor.track];
   const bar = track?.bars[cursor.bar];
@@ -63,6 +65,9 @@ export function useEditor() {
   const commit = useCallback((ops: Op[], label: string) => {
     if (ops.length === 0) return;
     const batch: OpBatch = { id: nextId("k"), ops, label };
+    // Handlers run once per user action (unlike updaters), so this cannot
+    // double-send under StrictMode. An ineffective batch no-ops remotely too.
+    commitListenerRef.current?.(batch);
     setState((prev) => {
       const nextScore = applyBatch(prev.score, batch);
       if (nextScore === prev.score) return prev;
@@ -95,6 +100,23 @@ export function useEditor() {
         future: prev.future.slice(1),
       };
     });
+  }, []);
+
+  /**
+   * Applies a batch from a collaborator. Deliberately not an undo step: your
+   * Ctrl+Z must never revert someone else's edit. Local undo snapshots from
+   * before the remote batch still apply cleanly because ops addressing ids
+   * the snapshot lacks are no-ops.
+   */
+  const applyRemote = useCallback((batch: OpBatch) => {
+    setState((prev) => {
+      const nextScore = applyBatch(prev.score, batch);
+      return nextScore === prev.score ? prev : { ...prev, score: nextScore };
+    });
+  }, []);
+
+  const setCommitListener = useCallback((listener: ((batch: OpBatch) => void) | null) => {
+    commitListenerRef.current = listener;
   }, []);
 
   /** Enters a fret on the cursor's string, combining consecutive digits into 10-24. */
@@ -274,6 +296,8 @@ export function useEditor() {
     moveString,
     undo,
     redo,
+    applyRemote,
+    setCommitListener,
     newScore,
     loadScore,
   };

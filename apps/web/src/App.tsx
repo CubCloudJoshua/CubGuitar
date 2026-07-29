@@ -7,6 +7,7 @@ import { useLibrary } from "./library/useLibrary";
 import { useSharedView } from "./share/useSharedView";
 import { useShareLink } from "./share/useShareLink";
 import { useAuth } from "./auth/useAuth";
+import { collabIdFromLocation, useCollab } from "./collab/useCollab";
 import { EditorBar } from "./editor/EditorBar";
 import { Toolbar } from "./components/Toolbar";
 import { TrackMixer } from "./components/TrackMixer";
@@ -21,12 +22,28 @@ export function App() {
   const editor = useEditor();
   const narrow = useNarrow();
   const shared = useSharedView(c);
-  const lib = useLibrary(c, editor, narrow, shared.active);
+  // A collab guest gets the host's document from the room; seeding the demo
+  // or reopening their own library on boot would race alphaTab with three
+  // overlapping loads (observed as a crash in its worker message handling).
+  const [joinedCollab] = useState(() => collabIdFromLocation() !== null);
+  const lib = useLibrary(c, editor, narrow, shared.active || joinedCollab);
   const shareLink = useShareLink();
   const auth = useAuth();
+  const collab = useCollab(editor, auth.user?.email.split("@")[0] ?? "guest");
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [accountOpen, setAccountOpen] = useState(false);
+
+  // Opened via a collab link: join the room and land in the editor. Guests
+  // do not autosave (no library entry); the host's autosave owns the doc.
+  const { join } = collab;
+  const { setMode } = lib;
+  useEffect(() => {
+    const roomId = collabIdFromLocation();
+    if (!roomId) return;
+    join(roomId);
+    setMode("edit");
+  }, [join, setMode]);
 
   // Space toggles playback everywhere except form fields and focused buttons,
   // in the player, the editor, and shared views alike.
@@ -106,6 +123,18 @@ export function App() {
         {editing && (
           <button onClick={() => lib.setMode("play")} style={headerButton}>PLAYER</button>
         )}
+        {editing && collab.status === "off" && (
+          <button onClick={collab.start} style={headerButton}>COLLAB</button>
+        )}
+        {collab.status === "live" && (
+          <button
+            onClick={collab.stop}
+            style={{ ...headerButton, background: theme.accent, color: theme.bg }}
+            title="End the live session for this device"
+          >
+            LIVE · {collab.peers.length} — STOP
+          </button>
+        )}
         {canShare && (
           <button
             onClick={() => void shareLink.share(currentEntry)}
@@ -152,9 +181,44 @@ export function App() {
       )}
 
       {shareLink.url && <ShareLinkBar url={shareLink.url} onDismiss={shareLink.dismiss} />}
+      {collab.status === "live" && collab.url && (
+        <div
+          style={{
+            display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8,
+            background: theme.panel, border: `1px solid ${theme.accent}`,
+            padding: 10, marginBottom: 10, fontFamily: theme.mono, fontSize: 11,
+          }}
+        >
+          <span style={{ color: theme.accent, fontWeight: 700 }}>LIVE SESSION</span>
+          <input
+            readOnly
+            value={collab.url}
+            aria-label="Collab link"
+            onFocus={(e) => e.target.select()}
+            style={{
+              flex: 1, minWidth: 160, fontFamily: theme.mono, fontSize: 12,
+              padding: "6px 8px", background: theme.bg,
+              border: `1px solid ${theme.border}`, color: theme.text,
+            }}
+          />
+          <button
+            onClick={() => void navigator.clipboard.writeText(collab.url ?? "").catch(() => undefined)}
+            style={headerButton}
+          >
+            COPY
+          </button>
+          <span style={{ color: theme.textDim }}>
+            {collab.peers.length} in session
+            {[...collab.cursors.values()]
+              .map((p) => ` · ${p.name} at bar ${p.bar + 1}, beat ${p.beat + 1}`)
+              .join("")}
+          </span>
+        </div>
+      )}
+      {collab.error && <ErrorBanner message={collab.error} />}
       {error && <ErrorBanner message={error} />}
 
-      {editing && <EditorBar e={editor} enabled={editing} />}
+      {editing && <EditorBar e={editor} enabled={editing} allowHistory={collab.status !== "live"} />}
       {editing && lib.importNotice && lib.importNotice.unsupported.length > 0 && (
         <ImportNoticeBanner notice={lib.importNotice} onDismiss={() => lib.setImportNotice(null)} />
       )}

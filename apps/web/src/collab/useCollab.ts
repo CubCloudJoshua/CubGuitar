@@ -1,0 +1,170 @@
+/**
+ * Client side of realtime collaboration.
+ *
+ * The host starts a session from the score they are editing; guests join by
+ * link. Every local commit streams to the room, every remote batch applies
+ * to the local document. The session lives as long as the room has members.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { Score as CoreScore, OpBatch } from "@cubscore/core";
+import type { EditorController } from "../editor/useEditor";
+
+export type CollabStatus = "off" | "connecting" | "live" | "error";
+
+export interface Peer {
+  id: string;
+  name: string;
+}
+
+export interface PeerCursor {
+  name: string;
+  bar: number;
+  beat: number;
+}
+
+interface ServerMessage {
+  type: "state" | "batch" | "peers" | "cursor";
+  you?: string;
+  snapshot?: unknown;
+  batches?: unknown[];
+  batch?: unknown;
+  peers?: Peer[];
+  from?: string;
+  name?: string;
+  cursor?: { bar: number; beat: number };
+}
+
+export function collabIdFromLocation(): string | null {
+  const match = /^#c=([A-Za-z0-9_-]{8,64})$/.exec(location.hash);
+  return match?.[1] ?? null;
+}
+
+function newRoomId(): string {
+  return crypto.randomUUID().replace(/-/g, "");
+}
+
+export function useCollab(editor: EditorController, displayName: string) {
+  const socketRef = useRef<WebSocket | null>(null);
+  const [status, setStatus] = useState<CollabStatus>("off");
+  const [url, setUrl] = useState<string | null>(null);
+  const [peers, setPeers] = useState<Peer[]>([]);
+  const [cursors, setCursors] = useState<Map<string, PeerCursor>>(new Map());
+  const [error, setError] = useState<string | null>(null);
+
+  const { applyRemote, setCommitListener, loadScore } = editor;
+
+  const connect = useCallback(
+    (roomId: string, seedScore: CoreScore | null) => {
+      socketRef.current?.close();
+      setStatus("connecting");
+      setError(null);
+
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      const socket = new WebSocket(
+        `${proto}://${location.host}/ws?room=${roomId}&name=${encodeURIComponent(displayName)}`,
+      );
+      socketRef.current = socket;
+
+      socket.onopen = () => {
+        if (seedScore) socket.send(JSON.stringify({ type: "init", score: seedScore }));
+        setStatus("live");
+        setUrl(`${location.origin}${location.pathname}#c=${roomId}`);
+      };
+
+      socket.onmessage = (event) => {
+        let message: ServerMessage;
+        try {
+          message = JSON.parse(String(event.data)) as ServerMessage;
+        } catch {
+          return;
+        }
+        switch (message.type) {
+          case "state":
+            // Guests replay the snapshot plus every batch since.
+            if (message.snapshot) {
+              loadScore(message.snapshot as CoreScore);
+              for (const batch of message.batches ?? []) applyRemote(batch as OpBatch);
+            }
+            if (message.peers) setPeers(message.peers);
+            break;
+          case "batch":
+            if (message.batch) applyRemote(message.batch as OpBatch);
+            break;
+          case "peers":
+            if (message.peers) setPeers(message.peers);
+            break;
+          case "cursor":
+            if (message.from && message.cursor) {
+              const { from, name, cursor } = message;
+              setCursors((prev) => {
+                const next = new Map(prev);
+                next.set(from, { name: name ?? "guest", bar: cursor.bar, beat: cursor.beat });
+                return next;
+              });
+            }
+            break;
+        }
+      };
+
+      socket.onerror = () => {
+        setStatus("error");
+        setError("collaboration connection failed");
+      };
+      socket.onclose = () => {
+        setStatus((s) => (s === "error" ? s : "off"));
+        setPeers([]);
+        setCursors(new Map());
+      };
+    },
+    [displayName, loadScore, applyRemote],
+  );
+
+  /** Host: open a room seeded with the score being edited. */
+  const start = useCallback(() => {
+    connect(newRoomId(), editor.score);
+  }, [connect, editor.score]);
+
+  /** Guest: join an existing room from a #c= link. */
+  const join = useCallback((roomId: string) => connect(roomId, null), [connect]);
+
+  const stop = useCallback(() => {
+    socketRef.current?.close();
+    socketRef.current = null;
+    setStatus("off");
+    setUrl(null);
+  }, []);
+
+  // Stream local commits into the room while live.
+  useEffect(() => {
+    if (status !== "live") {
+      setCommitListener(null);
+      return;
+    }
+    setCommitListener((batch) => {
+      const socket = socketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "batch", batch }));
+      }
+    });
+    return () => setCommitListener(null);
+  }, [status, setCommitListener]);
+
+  // Presence: share the caret position, lightly throttled.
+  const { cursor } = editor;
+  useEffect(() => {
+    if (status !== "live") return;
+    const timer = setTimeout(() => {
+      const socket = socketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: "cursor", cursor: { bar: cursor.bar, beat: cursor.beat } }));
+      }
+    }, 150);
+    return () => clearTimeout(timer);
+  }, [status, cursor]);
+
+  useEffect(() => () => socketRef.current?.close(), []);
+
+  return { status, url, peers, cursors, error, start, join, stop };
+}
+
+export type CollabController = ReturnType<typeof useCollab>;

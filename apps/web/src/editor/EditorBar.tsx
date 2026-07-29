@@ -35,7 +35,7 @@ const btn = {
 } as const;
 
 /** Global key handling, so the editor behaves like a desktop app. */
-function useEditorKeys(e: EditorController, enabled: boolean) {
+function useEditorKeys(e: EditorController, enabled: boolean, allowHistory: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const onKey = (ev: KeyboardEvent) => {
@@ -44,6 +44,10 @@ function useEditorKeys(e: EditorController, enabled: boolean) {
 
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") {
         ev.preventDefault();
+        // Undo is snapshot-based and local, so during a live session it would
+        // silently fork the document from the other members. Disabled until
+        // collaborative undo lands as broadcast inverse ops.
+        if (!allowHistory) return;
         if (ev.shiftKey) e.redo();
         else e.undo();
         return;
@@ -139,10 +143,20 @@ const labelStyle = {
   letterSpacing: 0.5,
 } as const;
 
-export function EditorBar({ e, enabled }: { e: EditorController; enabled: boolean }) {
-  useEditorKeys(e, enabled);
+export function EditorBar({
+  e,
+  enabled,
+  allowHistory = true,
+}: {
+  e: EditorController;
+  enabled: boolean;
+  allowHistory?: boolean;
+}) {
+  useEditorKeys(e, enabled, allowHistory);
 
   const note = e.currentBeat?.notes.find((n) => n.string === e.cursor.string);
+  const canUndo = allowHistory && e.canUndo;
+  const canRedo = allowHistory && e.canRedo;
 
   return (
     <div
@@ -207,10 +221,20 @@ export function EditorBar({ e, enabled }: { e: EditorController; enabled: boolea
       <button onClick={e.deleteNote} style={btn} disabled={!note}>DEL</button>
 
       <Divider />
-      <button onClick={e.undo} style={{ ...btn, opacity: e.canUndo ? 1 : 0.4 }} disabled={!e.canUndo}>
+      <button
+        onClick={e.undo}
+        style={{ ...btn, opacity: canUndo ? 1 : 0.4 }}
+        disabled={!canUndo}
+        title={allowHistory ? undefined : "Undo is unavailable during a live session"}
+      >
         UNDO
       </button>
-      <button onClick={e.redo} style={{ ...btn, opacity: e.canRedo ? 1 : 0.4 }} disabled={!e.canRedo}>
+      <button
+        onClick={e.redo}
+        style={{ ...btn, opacity: canRedo ? 1 : 0.4 }}
+        disabled={!canRedo}
+        title={allowHistory ? undefined : "Undo is unavailable during a live session"}
+      >
         REDO
       </button>
 

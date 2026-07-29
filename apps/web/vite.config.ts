@@ -4,7 +4,10 @@ import react from "@vitejs/plugin-react";
 import { alphaTab } from "@coderline/alphatab-vite";
 
 // Same-origin API in dev and preview; production serves both behind one host.
-const proxy = { "/api": "http://127.0.0.1:8787" };
+const proxy = {
+  "/api": "http://127.0.0.1:8787",
+  "/ws": { target: "ws://127.0.0.1:8788", ws: true },
+};
 
 export default defineConfig({
   plugins: [react(), alphaTab()],
