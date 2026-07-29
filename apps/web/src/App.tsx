@@ -3,6 +3,7 @@ import { useAlphaTab } from "./useAlphaTab";
 import { useNarrow } from "./useNarrow";
 import { useEditor } from "./editor/useEditor";
 import { useLibrary } from "./library/useLibrary";
+import { adoptUnowned, setLibraryOwner } from "./library/db";
 import { useSharedView } from "./share/useSharedView";
 import { useShareLink } from "./share/useShareLink";
 import { useAuth } from "./auth/useAuth";
@@ -35,6 +36,27 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Tell the library whose it is. Every read of the library waits for this, so
+  // that a signed-in user is never briefly shown an empty library — which
+  // would seed a second demo score into it. Signing in for the first time
+  // adopts whatever was made while signed out.
+  const { refresh, releaseEditor } = lib;
+  const knownOwner = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    if (!auth.checked) return;
+    const ownerId = auth.user?.id ?? null;
+    if (knownOwner.current === ownerId) return;
+    // undefined means this is the first resolution on boot, not a switch.
+    const switched = knownOwner.current !== undefined;
+    knownOwner.current = ownerId;
+    void (async () => {
+      if (switched) await releaseEditor();
+      if (ownerId) await adoptUnowned(ownerId);
+      setLibraryOwner(ownerId);
+      await refresh();
+    })();
+  }, [auth.checked, auth.user, refresh, releaseEditor]);
 
   // Opened via a collab link: join the room and land in the editor. Guests
   // do not autosave (no library entry); the host's autosave owns the doc.

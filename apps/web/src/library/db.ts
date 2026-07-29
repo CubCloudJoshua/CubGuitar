@@ -16,6 +16,11 @@ export type ScoreFormat = "gp" | "altex";
 export interface LibraryEntry {
   id: string;
   /**
+   * Account this entry belongs to, or null for work done while signed out.
+   * Absent on entries written before ownership existed, which read as null.
+   */
+  ownerId?: string | null;
+  /**
    * Bumped on every save. A writer that loaded rev N and finds rev != N knows
    * another tab moved the row on, and forks rather than clobbering it.
    */
@@ -71,10 +76,60 @@ function tx<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequ
   );
 }
 
-export function listEntries(): Promise<LibraryEntry[]> {
-  return tx<LibraryEntry[]>("readonly", (s) => s.getAll() as IDBRequest<LibraryEntry[]>).then((all) =>
-    all.sort((a, b) => b.openedAt - a.openedAt),
-  );
+/**
+ * Whose library this device is showing.
+ *
+ * Signing out does not clear IndexedDB: on a personal machine that would throw
+ * away the user's work every time they signed out. On a shared machine it
+ * meant the next person to sign in found the previous person's scores in their
+ * library and pushed them to their own cloud account on the next sync. Entries
+ * are owned, and only the current owner's are listed.
+ *
+ * Signing out hides entries rather than deleting them, so signing back in
+ * restores them. The bytes stay on the disk: this is privacy between accounts
+ * on one browser profile, not protection against someone with the machine.
+ */
+let owner: string | null = null;
+let announceOwner: (() => void) | null = null;
+/** Resolves the first time the app knows who is signed in. */
+const ownerKnown = new Promise<void>((resolve) => {
+  announceOwner = resolve;
+});
+
+export function setLibraryOwner(ownerId: string | null): void {
+  owner = ownerId;
+  announceOwner?.();
+  announceOwner = null;
+}
+
+export function libraryOwner(): string | null {
+  return owner;
+}
+
+function ownedBy(entry: LibraryEntry, ownerId: string | null): boolean {
+  return (entry.ownerId ?? null) === ownerId;
+}
+
+/**
+ * The current owner's entries. Waits for sign-in state to resolve, because
+ * listing too early would show a signed-in user an empty library and then seed
+ * a second demo score into it.
+ */
+export async function listEntries(): Promise<LibraryEntry[]> {
+  await ownerKnown;
+  const all = await tx<LibraryEntry[]>("readonly", (s) => s.getAll() as IDBRequest<LibraryEntry[]>);
+  return all.filter((e) => ownedBy(e, owner)).sort((a, b) => b.openedAt - a.openedAt);
+}
+
+/**
+ * Hands entries made while signed out to an account that just signed in. This
+ * is what makes the first sign-in keep your work instead of hiding it.
+ */
+export async function adoptUnowned(ownerId: string): Promise<number> {
+  const all = await tx<LibraryEntry[]>("readonly", (s) => s.getAll() as IDBRequest<LibraryEntry[]>);
+  const orphans = all.filter((e) => ownedBy(e, null));
+  for (const entry of orphans) await putEntry({ ...entry, ownerId });
+  return orphans.length;
 }
 
 export function getEntry(id: string): Promise<LibraryEntry | undefined> {

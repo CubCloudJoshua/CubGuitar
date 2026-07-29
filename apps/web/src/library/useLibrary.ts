@@ -8,7 +8,7 @@ import type { Score as CoreScore } from "@cubscore/core";
 import { fromAlphaTab, type ImportReport } from "@cubscore/formats";
 import type { AlphaTabController } from "../useAlphaTab";
 import type { EditorController } from "../editor/useEditor";
-import { deleteEntry, getEntry, listEntries, newId, putEntry, type LibraryEntry } from "./db";
+import { deleteEntry, getEntry, libraryOwner, listEntries, newId, putEntry, type LibraryEntry } from "./db";
 import { DEMO_SCORE } from "../demo";
 
 type Mode = "play" | "edit";
@@ -121,6 +121,7 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       }
       await putEntry({
         id: pending.id,
+        ownerId: libraryOwner(),
         rev: 0,
         title: c.score?.title ?? "Untitled",
         artist: c.score?.artist ?? "",
@@ -185,6 +186,7 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
 
     const entry: LibraryEntry = {
       id,
+      ownerId: source?.ownerId ?? libraryOwner(),
       rev: (source?.rev ?? 0) + 1,
       title: score.title,
       artist: score.artist,
@@ -244,6 +246,17 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     void flushSave();
     setMode("play");
   }, [flushSave]);
+
+  /**
+   * Leaves the editor and gives up the row as well. Used when the signed-in
+   * account changes: the open document belongs to whoever was signed in when
+   * it was opened, and further keystrokes must not keep landing in their row.
+   */
+  const releaseEditor = useCallback(async () => {
+    await flushSave();
+    setEditorTarget(null);
+    setMode("play");
+  }, [flushSave, setEditorTarget]);
 
   /** Converts the open imported score into an editable document. */
   const editImported = useCallback(async () => {
@@ -385,6 +398,7 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     setImportNotice,
     refresh,
     leaveEditor,
+    releaseEditor,
     flushSave,
     showImportedOriginal,
     adoptEditorScore,

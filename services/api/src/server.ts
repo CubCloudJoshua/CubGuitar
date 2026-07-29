@@ -43,22 +43,44 @@ const users = new FileUserStore(path.join(DATA_DIR, "users"));
 const sessions = new FileSessionStore(path.join(DATA_DIR, "sessions"));
 const library = new FileLibraryStore(path.join(DATA_DIR, "library"));
 
-const app = Fastify({ bodyLimit: MAX_BODY });
+// Behind a reverse proxy every request arrives from the proxy, so keying a
+// rate limit on the socket address would put every user in one bucket and let
+// one busy client lock out the rest. Set TRUST_PROXY=1 only when a proxy you
+// control sets X-Forwarded-For, because otherwise clients can forge it.
+const app = Fastify({ bodyLimit: MAX_BODY, trustProxy: process.env.TRUST_PROXY === "1" });
 
-/** In-memory per-IP limit on writes. Enough for dev and single-node deploys. */
-const RATE_LIMIT = 120;
-const RATE_WINDOW_MS = 60 * 60 * 1000;
-const writeCounts = new Map<string, { count: number; resetAt: number }>();
+/**
+ * In-memory rate limiting, per client and per bucket.
+ *
+ * The buckets are separate because they defend different things. Syncing a
+ * large library is hundreds of legitimate writes; guessing a password is
+ * twenty illegitimate attempts. One shared budget means either the sync
+ * breaks or the guessing is comfortable.
+ */
+const LIMITS = {
+  auth: { max: 30, windowMs: 15 * 60 * 1000 },
+  write: { max: 600, windowMs: 60 * 60 * 1000 },
+} as const;
 
-function overWriteLimit(ip: string): boolean {
+const hits = new Map<string, { count: number; resetAt: number }>();
+
+function tooMany(bucket: keyof typeof LIMITS, key: string): boolean {
   const now = Date.now();
-  const entry = writeCounts.get(ip);
+  // Every distinct key allocates an entry, so a stream of unique addresses
+  // would grow this map without bound. Sweep expired entries when it gets
+  // big rather than scanning on every request.
+  if (hits.size > 20_000) {
+    for (const [k, v] of hits) if (now >= v.resetAt) hits.delete(k);
+  }
+  const limit = LIMITS[bucket];
+  const mapKey = `${bucket} ${key}`;
+  const entry = hits.get(mapKey);
   if (!entry || now >= entry.resetAt) {
-    writeCounts.set(ip, { count: 1, resetAt: now + RATE_WINDOW_MS });
+    hits.set(mapKey, { count: 1, resetAt: now + limit.windowMs });
     return false;
   }
   entry.count += 1;
-  return entry.count > RATE_LIMIT;
+  return entry.count > limit.max;
 }
 
 function sessionToken(request: FastifyRequest): string | null {
@@ -95,15 +117,12 @@ function publicUser(user: User) {
 // ---------- auth ----------
 
 app.post("/api/auth/register", async (request, reply) => {
-  if (overWriteLimit(request.ip)) return reply.status(429).send({ error: "rate limit exceeded" });
+  if (tooMany("auth", request.ip)) return reply.status(429).send({ error: "rate limit exceeded" });
   const body = (request.body ?? {}) as { email?: unknown; password?: unknown };
   const email = normalizeEmail(body.email);
   if (!email) return reply.status(400).send({ error: "a valid email is required" });
   if (!validPassword(body.password)) {
     return reply.status(400).send({ error: "password must be at least 8 characters" });
-  }
-  if (await users.byEmail(email)) {
-    return reply.status(409).send({ error: "an account with this email already exists" });
   }
   const user: User = {
     id: newShareId(),
@@ -111,7 +130,14 @@ app.post("/api/auth/register", async (request, reply) => {
     passwordHash: hashPassword(body.password),
     createdAt: Date.now(),
   };
+  // Record first, then claim the address. Claiming decides who wins a race, so
+  // a loser leaves behind a user record no one holds an id or session for,
+  // which is harmless; the reverse order would hand the address to an account
+  // whose record failed to write.
   await users.put(user);
+  if (!(await users.claimEmail(email, user.id))) {
+    return reply.status(409).send({ error: "an account with this email already exists" });
+  }
   const token = newSessionToken();
   await sessions.create(token, user.id);
   setSessionCookie(reply, token);
@@ -119,9 +145,14 @@ app.post("/api/auth/register", async (request, reply) => {
 });
 
 app.post("/api/auth/login", async (request, reply) => {
-  if (overWriteLimit(request.ip)) return reply.status(429).send({ error: "rate limit exceeded" });
+  if (tooMany("auth", request.ip)) return reply.status(429).send({ error: "rate limit exceeded" });
   const body = (request.body ?? {}) as { email?: unknown; password?: unknown };
   const email = normalizeEmail(body.email);
+  // Also limited per address, so spreading the guesses across many clients
+  // does not buy an attacker an unlimited number of attempts at one account.
+  if (email && tooMany("auth", `to ${email}`)) {
+    return reply.status(429).send({ error: "rate limit exceeded" });
+  }
   const user = email ? await users.byEmail(email) : undefined;
   // Same failure for unknown email and wrong password.
   if (!user || typeof body.password !== "string" || !verifyPassword(body.password, user.passwordHash)) {
@@ -177,7 +208,7 @@ app.get("/api/library", async (request, reply) => {
 app.put<{ Params: { id: string } }>("/api/library/:id", async (request, reply) => {
   const user = await currentUser(request);
   if (!user) return reply.status(401).send({ error: "not signed in" });
-  if (overWriteLimit(request.ip)) return reply.status(429).send({ error: "rate limit exceeded" });
+  if (tooMany("write", user.id)) return reply.status(429).send({ error: "rate limit exceeded" });
   if (!/^[A-Za-z0-9_-]{1,64}$/.test(request.params.id)) {
     return reply.status(400).send({ error: "invalid id" });
   }
@@ -239,7 +270,7 @@ interface CreateBody {
 }
 
 app.post("/api/scores", async (request, reply) => {
-  if (overWriteLimit(request.ip)) {
+  if (tooMany("write", request.ip)) {
     return reply.status(429).send({ error: "rate limit exceeded, try again later" });
   }
   const body = (request.body ?? {}) as CreateBody;

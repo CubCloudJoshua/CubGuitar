@@ -7,7 +7,7 @@
  * backup and transfer. Real multi-device merge arrives with the CRDT sync
  * service, which the op log was designed for.
  */
-import { listEntries, putEntry, type LibraryEntry } from "./db";
+import { libraryOwner, listEntries, putEntry, type LibraryEntry } from "./db";
 import { base64ToBytes } from "../share";
 
 export interface SyncResult {
@@ -66,6 +66,11 @@ async function pushEntry(entry: LibraryEntry): Promise<void> {
 }
 
 export async function syncNow(): Promise<SyncResult> {
+  const ownerId = libraryOwner();
+  // listEntries already returns only this account's entries, so a shared
+  // browser cannot push the previous user's scores into this user's cloud.
+  // Refusing outright while signed out is clearer than pushing to a 401.
+  if (!ownerId) throw new Error("sign in to sync");
   const local = await listEntries();
   const localIds = new Set(local.map((e) => e.id));
 
@@ -83,6 +88,7 @@ export async function syncNow(): Promise<SyncResult> {
     const full = (await response.json()) as CloudFull;
     await putEntry({
       id: full.id,
+      ownerId,
       rev: 0,
       title: full.title,
       artist: full.artist,

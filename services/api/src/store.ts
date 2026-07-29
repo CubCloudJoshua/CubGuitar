@@ -6,8 +6,8 @@
  * object storage on CubCloud infra) implements the same interface; nothing
  * above this file changes.
  */
-import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
-import { randomBytes } from "node:crypto";
+import { mkdir, readdir, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { createHash, randomBytes } from "node:crypto";
 import path from "node:path";
 
 export interface SharedScore {
@@ -42,6 +42,13 @@ export interface UserStore {
   byEmail(email: string): Promise<User | undefined>;
   byId(id: string): Promise<User | undefined>;
   put(user: User): Promise<void>;
+  /**
+   * Binds an email to a user id, or fails because someone else already holds
+   * it. Registration needs one indivisible step here: a check followed by a
+   * write lets two simultaneous signups both pass the check and create two
+   * accounts for one address, and only one of them can ever log in.
+   */
+  claimEmail(email: string, userId: string): Promise<boolean>;
 }
 
 export interface SessionStore {
@@ -95,18 +102,57 @@ class JsonDir<T extends { id: string }> {
     return path.join(this.dir, `${id}.json`);
   }
 
+  /**
+   * Write to a temporary name, then rename over the target.
+   *
+   * writeFile truncates first, so a crash or a full disk mid-write leaves a
+   * half-written record where a whole one used to be. rename is atomic within
+   * a filesystem: a reader sees the old record or the new one, never a
+   * fragment. The .tmp suffix keeps casualties out of all(), which only reads
+   * names ending in .json.
+   */
   async put(record: T): Promise<void> {
     await mkdir(this.dir, { recursive: true });
-    await writeFile(this.fileFor(record.id), JSON.stringify(record));
+    const file = this.fileFor(record.id);
+    const temp = `${file}.${randomBytes(6).toString("hex")}.tmp`;
+    try {
+      await writeFile(temp, JSON.stringify(record));
+      await rename(temp, file);
+    } catch (e) {
+      await rm(temp, { force: true }).catch(() => undefined);
+      throw e;
+    }
+  }
+
+  /** Exclusive create. False means the key was already claimed. */
+  async claim(id: string, record: T): Promise<boolean> {
+    await mkdir(this.dir, { recursive: true });
+    try {
+      await writeFile(this.fileFor(id), JSON.stringify(record), { flag: "wx" });
+      return true;
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") return false;
+      throw e;
+    }
   }
 
   async get(id: string): Promise<T | undefined> {
+    let raw: string;
     try {
-      return JSON.parse(await readFile(this.fileFor(id), "utf8")) as T;
+      raw = await readFile(this.fileFor(id), "utf8");
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code === "ENOENT") return undefined;
       if ((e as Error).message === "invalid id") return undefined;
       throw e;
+    }
+    try {
+      return JSON.parse(raw) as T;
+    } catch {
+      // Damage stays with the damaged record. This used to throw, and because
+      // finding a user by email scanned every user file, one unparseable
+      // record failed every login on the server rather than just its own.
+      console.error(`cubscore: ignoring unreadable record ${this.fileFor(id)}`);
+      return undefined;
     }
   }
 
@@ -163,9 +209,17 @@ export class FileStore implements ScoreStore {
 
 export class FileUserStore implements UserStore {
   private readonly docs: JsonDir<User>;
+  /** email -> user id, so a login is two reads rather than a full scan. */
+  private readonly emails: JsonDir<{ id: string; userId: string }>;
 
   constructor(dir: string) {
     this.docs = new JsonDir<User>(dir);
+    this.emails = new JsonDir(path.join(dir, "by-email"));
+  }
+
+  /** Emails are not filename-safe, and hashing keeps them out of directory listings. */
+  private static key(email: string): string {
+    return createHash("sha256").update(email).digest("hex").slice(0, 32);
   }
 
   put(user: User): Promise<void> {
@@ -176,7 +230,15 @@ export class FileUserStore implements UserStore {
     return this.docs.get(id);
   }
 
+  claimEmail(email: string, userId: string): Promise<boolean> {
+    const key = FileUserStore.key(email);
+    return this.emails.claim(key, { id: key, userId });
+  }
+
   async byEmail(email: string): Promise<User | undefined> {
+    const pointer = await this.emails.get(FileUserStore.key(email));
+    if (pointer) return this.docs.get(pointer.userId);
+    // Accounts created before the index existed are only findable by scan.
     const all = await this.docs.all();
     return all.find((u) => u.email === email);
   }

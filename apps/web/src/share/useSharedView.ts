@@ -1,7 +1,7 @@
 /** Recipient side of a share link: load read-only, offer save-to-library. */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AlphaTabController } from "../useAlphaTab";
-import { newId, putEntry } from "../library/db";
+import { libraryOwner, newId, putEntry } from "../library/db";
 import { base64ToBytes, fetchShared, sharedIdFromLocation, type SharedScorePayload } from "../share";
 
 export function useSharedView(c: AlphaTabController) {
@@ -32,6 +32,7 @@ export function useSharedView(c: AlphaTabController) {
     if (!payload || !c.score) return;
     await putEntry({
       id: newId(),
+      ownerId: libraryOwner(),
       rev: 0,
       title: c.score.title,
       artist: c.score.artist,
