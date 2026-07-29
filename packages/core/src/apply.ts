@@ -97,6 +97,19 @@ export function applyOp(score: Score, op: Op): Score {
         t.id === op.trackId ? { ...t, bars: t.bars.filter((b) => b.id !== op.barId) } : t,
       );
 
+    case "bar.setTempo":
+      return mapBars(score, (b) => {
+        if (b.id !== op.barId) return b;
+        if (op.tempoBpm === null) {
+          const { tempoBpm, ...rest } = b;
+          return rest;
+        }
+        return { ...b, tempoBpm: op.tempoBpm };
+      });
+
+    case "bar.setTimeSignature":
+      return mapBars(score, (b) => (b.id === op.barId ? { ...b, timeSignature: op.timeSignature } : b));
+
     case "beat.insert":
       return mapVoices(score, (v) => {
         if (v.id !== op.voiceId) return v;

@@ -72,6 +72,7 @@ function articulationsOf(note: alphaTab.model.Note, ctx: Ctx): Articulation[] {
       break;
     default:
       out.push("artificialHarmonic");
+      ctx.unsupported.add("harmonic pitch detail (harmonic type kept, exact pitch simplified)");
       break;
   }
 
@@ -97,7 +98,9 @@ function noteOf(note: alphaTab.model.Note, stringCount: number, ctx: Ctx): Note 
     // number from the highest. Verified against the parser, not assumed:
     // a 6-string note written on string 6 arrives as string 1.
     out.string = stringCount + 1 - note.string;
-    out.fret = note.fret;
+    // GP3 encodes dead notes at fret -1 (they read back as open-string-1);
+    // frets are never negative in our model.
+    out.fret = Math.max(0, note.fret);
   }
   if (note.isTieOrigin) out.tiedToNext = true;
   return out;

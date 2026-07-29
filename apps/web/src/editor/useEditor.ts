@@ -6,9 +6,12 @@ import {
   createNote,
   createRest,
   createScore,
+  createTrack,
   duration,
+  frettedGuitar,
   nextId,
   pitchAt,
+  STANDARD_BASS,
   tickAt,
   toAlphaTex,
   type Articulation,
@@ -214,6 +217,74 @@ export function useEditor() {
     [commit],
   );
 
+  /** Tempo lives on the first bar of the first track; alphaTab applies it globally. */
+  const setTempo = useCallback(
+    (tempoBpm: number) => {
+      const firstBar = score.tracks[0]?.bars[0];
+      if (!firstBar || !Number.isFinite(tempoBpm)) return;
+      const clamped = Math.max(20, Math.min(400, Math.round(tempoBpm)));
+      commit([op({ type: "bar.setTempo", barId: firstBar.id, tempoBpm: clamped })], "Tempo");
+    },
+    [score, commit],
+  );
+
+  /**
+   * Sets the meter from the cursor's bar onward (notation-level; existing
+   * beats keep their durations, matching how tab editors treat meter edits).
+   * Applied to the same bar index on every track so the masterbar agrees.
+   */
+  const setTimeSignature = useCallback(
+    (beats: number, beatValue: number) => {
+      if (beats < 1 || beats > 32 || ![1, 2, 4, 8, 16].includes(beatValue)) return;
+      const ops: Op[] = [];
+      for (const t of score.tracks) {
+        const targetBar = t.bars[cursor.bar];
+        if (targetBar) {
+          ops.push(
+            op({ type: "bar.setTimeSignature", barId: targetBar.id, timeSignature: { beats, beatValue } }),
+          );
+        }
+      }
+      commit(ops, "Time signature");
+    },
+    [score, cursor.bar, commit],
+  );
+
+  const selectTrack = useCallback((index: number) => {
+    digitRef.current = null;
+    setCursor((c) => ({ ...c, track: index, bar: 0, beat: 0, string: 1 }));
+  }, []);
+
+  const addTrack = useCallback(
+    (kind: "guitar" | "bass") => {
+      const barCount = Math.max(1, score.tracks[0]?.bars.length ?? 4);
+      const newTrack =
+        kind === "guitar"
+          ? createTrack("Guitar", frettedGuitar(), barCount)
+          : createTrack("Bass", { kind: "fretted", tuning: [...STANDARD_BASS], frets: 24, capo: 0 }, barCount);
+      commit([op({ type: "track.insert", index: score.tracks.length, track: newTrack })], "Add track");
+      setCursor({ track: score.tracks.length, bar: 0, beat: 0, string: 1 });
+    },
+    [score, commit],
+  );
+
+  const removeTrack = useCallback(() => {
+    if (score.tracks.length <= 1) return;
+    const target = score.tracks[cursor.track];
+    if (!target) return;
+    commit([op({ type: "track.remove", trackId: target.id })], "Remove track");
+    setCursor({ track: 0, bar: 0, beat: 0, string: 1 });
+  }, [score, cursor.track, commit]);
+
+  const renameTrack = useCallback(
+    (name: string) => {
+      const target = score.tracks[cursor.track];
+      if (!target) return;
+      commit([op({ type: "track.rename", trackId: target.id, name })], "Rename track");
+    },
+    [score, cursor.track, commit],
+  );
+
   const moveBeat = useCallback(
     (delta: number) => {
       digitRef.current = null;
@@ -292,6 +363,12 @@ export function useEditor() {
     addBar,
     setTitle,
     setArtist,
+    setTempo,
+    setTimeSignature,
+    selectTrack,
+    addTrack,
+    removeTrack,
+    renameTrack,
     moveBeat,
     moveString,
     undo,

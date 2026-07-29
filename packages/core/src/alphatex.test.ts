@@ -125,11 +125,28 @@ describe("toAlphaTex", () => {
     expect(tex.match(/\\ts 4 4/g)).toHaveLength(1);
   });
 
-  it("writes dead notes as x on the string", () => {
+  it("writes dead notes with their fret preserved", () => {
     const score = createScore("t");
     const track = trackOf(score);
     const beat = track.bars[0]!.voices[0]!.beats[0]!;
-    const dead = { ...createNote(0, 5, 0), articulations: ["deadNote" as const] };
+    const dead = { ...createNote(48, 5, 3), articulations: ["deadNote" as const] };
+    const bars = track.bars.map((bar, i) =>
+      i === 0
+        ? {
+            ...bar,
+            voices: [{ ...bar.voices[0]!, beats: [{ ...beat, notes: [dead] }, ...bar.voices[0]!.beats.slice(1)] }],
+          }
+        : bar,
+    );
+    const tex = toAlphaTex({ ...score, tracks: [{ ...track, bars }] });
+    expect(tex).toContain("3.5{x}");
+  });
+
+  it("falls back to bare x when a dead note has no usable fret", () => {
+    const score = createScore("t");
+    const track = trackOf(score);
+    const beat = track.bars[0]!.voices[0]!.beats[0]!;
+    const dead = { id: "dn", pitch: 45, string: 5, articulations: ["deadNote" as const] };
     const bars = track.bars.map((bar, i) =>
       i === 0
         ? {

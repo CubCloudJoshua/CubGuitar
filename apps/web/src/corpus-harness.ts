@@ -86,7 +86,21 @@ function collect(score: alphaTab.model.Score, skipPercussion: boolean): Stats {
       for (const bar of staff.bars) {
         for (const voice of bar.voices) {
           for (const beat of voice.beats) {
-            for (const note of beat.notes) pitches.push(note.realValue);
+            for (const note of beat.notes) {
+              // Dead notes are unpitched; GP3 additionally encodes them at
+              // open-string-1 (fret -1), so comparing their "pitch" measures
+              // a format quirk rather than musical content. Their placement
+              // fidelity is covered by fret-preserving serialization.
+              if (note.isDead) continue;
+              // Harmonics compare by fretted pitch: the model keeps the
+              // harmonic flag but not the exact harmonic pitch math, which
+              // the importer reports as simplified.
+              pitches.push(
+                note.harmonicType !== alphaTab.model.HarmonicType.None
+                  ? note.realValueWithoutHarmonic
+                  : note.realValue,
+              );
+            }
           }
         }
       }
@@ -283,7 +297,13 @@ window.cubscore = {
       tuning: score.tracks[0]?.staves[0]?.stringTuning.tunings ?? [],
       notes: (score.tracks[0]?.staves[0]?.bars ?? []).flatMap((b, bi) =>
         b.voices[0]?.beats.flatMap((beat) =>
-          beat.notes.map((n) => ({ bar: bi, string: n.string, fret: n.fret, pitch: n.realValue })),
+          beat.notes.map((n) => ({
+            bar: bi,
+            string: n.string,
+            fret: n.fret,
+            pitch: n.realValue,
+            dead: n.isDead,
+          })),
         ) ?? [],
       ),
       bars: score.masterBars.map((m, i) => ({

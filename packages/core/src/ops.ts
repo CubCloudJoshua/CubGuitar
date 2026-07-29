@@ -7,7 +7,7 @@
  * that matters most".
  */
 
-import type { Articulation, Bar, Beat, Duration, Id, Note, Track } from "./score.js";
+import type { Articulation, Bar, Beat, Duration, Id, Note, TimeSignature, Track } from "./score.js";
 
 export interface OpMeta {
   /** Unique op id (client id + counter under CRDT sync). */
@@ -32,6 +32,8 @@ export type OpKind =
     | { type: "track.rename"; trackId: Id; name: string }
     | { type: "bar.insert"; trackId: Id; index: number; bar: Bar }
     | { type: "bar.remove"; trackId: Id; barId: Id }
+    | { type: "bar.setTempo"; barId: Id; tempoBpm: number | null }
+    | { type: "bar.setTimeSignature"; barId: Id; timeSignature: TimeSignature }
     | { type: "beat.insert"; voiceId: Id; index: number; beat: Beat }
     | { type: "beat.remove"; voiceId: Id; beatId: Id }
     | { type: "beat.setDuration"; beatId: Id; duration: Duration }

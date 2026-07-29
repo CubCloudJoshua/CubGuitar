@@ -52,20 +52,27 @@ function noteToken(beat: Beat, instrument: Instrument, tiedFromPrev: Set<number>
     const effects = note.articulations
       .map((a) => NOTE_EFFECTS[a])
       .filter((e): e is string => e !== undefined);
-    const suffix = effects.length > 0 ? `{${effects.join(" ")}}` : "";
+    const isDead = note.articulations.includes("deadNote");
+    const wrap = (list: string[]) => (list.length > 0 ? `{${list.join(" ")}}` : "");
 
     // A tie destination is written as a dash on its string; alphaTab restores
     // the pitch from the origin. Verified against the parser.
     if (note.string !== undefined && tiedFromPrev.has(note.string)) {
-      return `-.${note.string}${suffix}`;
+      return `-.${note.string}${wrap(effects)}`;
     }
-    if (note.articulations.includes("deadNote")) {
-      return `x.${note.string ?? 1}${suffix}`;
+    // Dead notes keep their fret: `3.4{x}` parses as a dead note at fret 3
+    // (verified against the parser); the bare `x` form loses placement and is
+    // only the fallback when no usable fret exists.
+    if (isDead && note.fret !== undefined && note.fret >= 0 && note.string !== undefined) {
+      return `${note.fret}.${note.string}${wrap([...effects, "x"])}`;
+    }
+    if (isDead) {
+      return `x.${note.string ?? 1}${wrap(effects)}`;
     }
     if (instrument.kind === "fretted" && note.string !== undefined && note.fret !== undefined) {
-      return `${note.fret}.${note.string}${suffix}`;
+      return `${note.fret}.${note.string}${wrap(effects)}`;
     }
-    return `${pitchToName(note.pitch)}${suffix}`;
+    return `${pitchToName(note.pitch)}${wrap(effects)}`;
   });
 
   if (parts.length === 0) return "r";
