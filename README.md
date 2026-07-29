@@ -40,6 +40,7 @@ The semantic score model in `packages/core` is the source of truth for authored 
 - `services/sync` — realtime collaboration rooms over WebSocket (`ws`), ordering and broadcasting op batches
 - `fixtures/` — original alphaTex scores, committed, run in CI
 - `corpus/` — real Guitar Pro files for import testing, gitignored (see `corpus/README.md`)
+- `e2e/` — browser-driven journey suites and their runner
 - `tools/corpus-check.mjs` — the Phase 0 exit test
 
 ## Develop
@@ -52,10 +53,22 @@ pnpm dev        # start the web app (proxies /api and /ws)
 pnpm build      # typecheck and build everything
 pnpm test       # unit tests (packages/core)
 pnpm corpus     # load and render every score in fixtures/ and corpus/
+pnpm e2e        # drive the built app in a browser across six journeys
 ```
 
-CI runs build, unit tests, and the corpus suite (including import round-trip
-pitch fidelity) on every push.
+CI runs build, unit tests, the corpus suite (including import round-trip pitch
+fidelity), and the end-to-end suites on every push.
+
+`pnpm e2e` needs `pnpm build` first. It stands up the API and sync services on
+isolated ports against a throwaway data directory, so it never touches a running
+dev stack or its data, then drives the real app in headless Chromium: editing,
+track and meter changes, the command palette, share-and-save, two-browser
+realtime collaboration, and accounts with cross-device sync and revocation. Pass
+suite names to run a subset (`pnpm e2e collab accounts`). Every UI regression in
+this project so far was caught here rather than by unit tests — focus races,
+double-committed operations, a semantic element lost in a refactor — which is why
+these journeys are version-controlled and gated in CI rather than kept as
+throwaway scripts.
 
 `pnpm corpus` runs the built app in headless Chromium, so run `pnpm build` first. It
 reports track, bar, and note counts per score, prints alphaTab diagnostics for
