@@ -70,6 +70,13 @@ export function useCommands(deps: CommandDeps): Command[] {
       add({ id: "player-mode", title: "Back to player", section: "Edit", run: lib.leaveEditor });
       add({ id: "add-guitar", title: "Add guitar track", section: "Edit", run: () => editor.addTrack("guitar") });
       add({ id: "add-bass", title: "Add bass track", section: "Edit", run: () => editor.addTrack("bass") });
+      // The instrument rail is the visible way to switch; these are how a
+      // keyboard-only user gets there, and they name the track so the palette
+      // teaches the arrangement rather than just listing indexes.
+      editor.score.tracks.forEach((t, i) => {
+        if (i === editor.cursor.track) return;
+        add({ id: `track-${t.id}`, title: `Go to track: ${t.name}`, section: "Edit", run: () => editor.selectTrack(i) });
+      });
       if (editor.score.tracks.length > 1) {
         add({ id: "remove-track", title: "Remove active track", section: "Edit", run: editor.removeTrack });
       }

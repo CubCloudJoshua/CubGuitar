@@ -9,6 +9,7 @@ import { useShareLink } from "./share/useShareLink";
 import { useAuth } from "./auth/useAuth";
 import { collabIdFromLocation, useCollab } from "./collab/useCollab";
 import { EditorBar } from "./editor/EditorBar";
+import { TrackRail } from "./editor/TrackRail";
 import { TransportPill } from "./components/TransportPill";
 import { ExportMenu } from "./components/ExportMenu";
 import { LibraryPanel } from "./library/LibraryPanel";
@@ -301,7 +302,9 @@ export function App() {
             padding: 8,
             position: "relative",
             minHeight: 200,
-            overflowX: "auto",
+            display: "flex",
+            gap: 8,
+            alignItems: "flex-start",
           }}
         >
           {c.rendering && (
@@ -314,7 +317,24 @@ export function App() {
               rendering…
             </span>
           )}
-          <div ref={c.hostRef} />
+          {/* The rail sits beside the score, not above it, so switching tracks
+              never moves the music. On a phone it costs an eighth of the width,
+              so it only appears once there is something to switch between; the
+              palette still adds tracks. */}
+          {editing && (!narrow || editor.score.tracks.length > 1) && (
+            <TrackRail
+              tracks={editor.score.tracks}
+              activeIndex={editor.cursor.track}
+              onSelect={editor.selectTrack}
+              onAdd={editor.addTrack}
+              onRemove={editor.removeTrack}
+            />
+          )}
+          {/* The scroller is the score's own box: the rail must stay put when a
+              wide arrangement scrolls sideways. */}
+          <div style={{ flex: 1, minWidth: 0, overflowX: "auto" }}>
+            <div ref={c.hostRef} />
+          </div>
         </div>
       </main>
 

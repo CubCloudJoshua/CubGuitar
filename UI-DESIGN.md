@@ -40,9 +40,11 @@ Three interactions worth over-investing in, because they carry the demo:
 
 **Status.** Phase A shipped: `packages/design` owns the tokens and the six primitives every component is built from, and no component hard-codes a color. Phase B shipped: the floating transport, the library drawer, and dim-on-play, all inherited automatically by share-link recipients. Phase C's keystone shipped: the Cmd+K palette assembles its commands from live context, which is what lets visible chrome shrink. Reduced motion and a visible focus ring are in.
 
-Still open in Phase C: the context strip that replaces the edit bar's button rows, the instrument rail, and in-score tempo/meter editing (the edit bar still carries every control at once, which is the ribbon shape this document exists to remove). Phases D and E are untouched.
+Phase C's context strip shipped: the strip shows only what applies to the selection, and the ribbon's thirty-controls-at-once is gone. The instrument rail shipped: tracks are one click each beside the score, and it carries add and remove, so the popover that held them was deleted rather than lightened. On a phone the rail appears only once there is a second track to switch to.
 
-Each phase has held its gate: seven browser-driven e2e suites (76 checks) plus unit and corpus suites pass before a phase lands. That gate has caught a semantic element lost in a restyle, a focus race that misrouted palette keystrokes, a button that swallowed the spacebar, and a transport that overflowed phone screens.
+Still open in Phase C: in-score tempo and meter editing, which still live behind the SCORE popover rather than on the printed marking. Phases D and E are untouched.
+
+Each phase has held its gate: nine browser-driven e2e suites (117 checks) plus unit and corpus suites pass before a phase lands. That gate has caught a semantic element lost in a restyle, a focus race that misrouted palette keystrokes, a button that swallowed the spacebar, a transport that overflowed phone screens, and an autosave that destroyed the file it was meant to protect.
 
 - **Phase A: tokens and shell (1-2 weeks).** Extract every inline style into a `packages/design` token set (colors, type, spacing, motion curves) plus primitives (Button, Field, Select, Drawer, Pill, Toast). Mechanical, zero behavior change, all e2e suites must stay green. This also deletes the current `styles.ts`/inline-style debt.
 - **Phase B: Listen mode (2 weeks).** Transport pill, library drawer, mixer dots, dim-on-play. The shared-view page inherits this automatically, which upgrades every link recipient's first impression.

@@ -169,7 +169,6 @@ export function EditorBar({
   const canUndo = allowHistory && e.canUndo;
   const canRedo = allowHistory && e.canRedo;
   const meter = effectiveMeter(e);
-  const activeTrack = e.score.tracks[e.cursor.track];
 
   return (
     <div
@@ -281,47 +280,9 @@ export function EditorBar({
         </div>
       </Popover>
 
-      <Popover
-        label={`${activeTrack?.name ?? "TRACK"} ▾`}
-        width={232}
-        buttonProps={{ size: "sm", "aria-label": "Tracks" }}
-      >
-        {(close) => (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            <label style={{ display: "flex", alignItems: "center", gap: 6, justifyContent: "space-between" }}>
-              <Label>ACTIVE</Label>
-              <SelectField
-                value={e.cursor.track}
-                onChange={(ev) => e.selectTrack(Number(ev.target.value))}
-                aria-label="Active track"
-                style={{ flex: 1 }}
-              >
-                {e.score.tracks.map((t, i) => (
-                  <option key={t.id} value={i}>
-                    {t.name}
-                  </option>
-                ))}
-              </SelectField>
-            </label>
-            <div style={{ display: "flex", gap: 6 }}>
-              <Button size="sm" onClick={() => { e.addTrack("guitar"); close(); }} title="Add a standard-tuned guitar track">
-                +GTR
-              </Button>
-              <Button size="sm" onClick={() => { e.addTrack("bass"); close(); }} title="Add a standard-tuned bass track">
-                +BASS
-              </Button>
-              <Button
-                size="sm"
-                onClick={() => { e.removeTrack(); close(); }}
-                disabled={e.score.tracks.length <= 1}
-                title="Remove the active track"
-              >
-                ✕TRK
-              </Button>
-            </div>
-          </div>
-        )}
-      </Popover>
+      {/* Track switching, adding and removing all live on the instrument rail
+          beside the score now (UI-DESIGN.md, Write mode), so the popover that
+          used to hold them is gone rather than merely lightened. */}
 
       <VDivider />
       <Button

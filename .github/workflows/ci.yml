@@ -38,7 +38,7 @@ jobs:
       - name: Corpus and import fidelity
         run: pnpm corpus
 
-      # Drives the built app in a real browser across six journeys, standing up
+      # Drives the built app in a real browser across nine journeys, standing up
       # the API and sync services against a throwaway data directory.
       - name: End-to-end suites
         run: pnpm e2e
