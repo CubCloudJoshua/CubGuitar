@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { Button, color, font, Label, Panel, typeScale, VDivider } from "@cubscore/design";
 import type { AlphaTabController } from "../useAlphaTab";
+import { usePhone } from "../useNarrow";
 import { TrackRows } from "./TrackMixer";
 
 const SPEED_PRESETS = [0.5, 0.75, 1];
@@ -22,6 +23,7 @@ function formatTime(seconds: number): string {
 
 export function TransportPill({ c }: { c: AlphaTabController }) {
   const [expanded, setExpanded] = useState(false);
+  const phone = usePhone();
   const disabled = !c.ready;
   const progress = c.position.endTime > 0 ? c.position.currentTime / c.position.endTime : 0;
 
@@ -30,14 +32,18 @@ export function TransportPill({ c }: { c: AlphaTabController }) {
       style={{
         position: "fixed",
         bottom: 16,
-        left: "50%",
-        transform: "translateX(-50%)",
+        // Insetting both edges rather than centring with a transform keeps the
+        // pill inside the viewport even when its content wants more room than
+        // the screen has, which is what pushed PLAY off a 390px phone.
+        left: 12,
+        right: 12,
         zIndex: 30,
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
         gap: 8,
-        maxWidth: "calc(100vw - 24px)",
+        // The wrapper spans the width, so it must not eat clicks on the score.
+        pointerEvents: "none",
       }}
     >
       {expanded && (
@@ -47,7 +53,9 @@ export function TransportPill({ c }: { c: AlphaTabController }) {
             flexDirection: "column",
             gap: 10,
             width: 560,
-            maxWidth: "calc(100vw - 24px)",
+            maxWidth: "100%",
+            boxSizing: "border-box",
+            pointerEvents: "auto",
             boxShadow: "0 12px 40px rgba(0,0,0,0.6)",
           }}
         >
@@ -113,30 +121,62 @@ export function TransportPill({ c }: { c: AlphaTabController }) {
         </Panel>
       )}
 
+      {/*
+        On a phone the pill keeps only play, position, and the more-controls
+        entry: stop, the speed readout, and the track dots are all reachable
+        one press away, and at 390px the full set overflowed the screen.
+      */}
       <div
         style={{
           display: "flex",
           alignItems: "center",
-          gap: 10,
+          gap: phone ? 8 : 10,
+          maxWidth: "100%",
+          boxSizing: "border-box",
           background: color.raisedHigh,
           border: `1px solid ${color.hairline}`,
           borderRadius: 999,
-          padding: "8px 14px",
+          padding: phone ? "8px 12px" : "8px 14px",
+          pointerEvents: "auto",
           boxShadow: "0 8px 30px rgba(0,0,0,0.55)",
         }}
       >
-        <Button variant="solid" onClick={c.playPause} disabled={disabled} style={{ borderRadius: 999, minWidth: 74 }}>
+        <Button
+          variant="solid"
+          onClick={c.playPause}
+          disabled={disabled}
+          style={{ borderRadius: 999, minWidth: phone ? 62 : 74, flexShrink: 0 }}
+        >
           {c.playing ? "PAUSE" : "PLAY"}
         </Button>
-        <Button size="sm" onClick={c.stop} disabled={disabled} style={{ borderRadius: 999 }}>
-          STOP
-        </Button>
+        {!phone && (
+          <Button size="sm" onClick={c.stop} disabled={disabled} style={{ borderRadius: 999 }}>
+            STOP
+          </Button>
+        )}
 
-        <span style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.textDim, whiteSpace: "nowrap" }}>
+        <span
+          style={{
+            fontFamily: font.mono,
+            fontSize: typeScale.sm,
+            color: color.textDim,
+            whiteSpace: "nowrap",
+            flexShrink: 0,
+          }}
+        >
           {formatTime(c.position.currentTime / 1000)} / {formatTime(c.position.endTime / 1000)}
         </span>
 
-        <div style={{ width: 120, height: 3, background: color.border, borderRadius: 2 }}>
+        <div
+          style={{
+            width: phone ? undefined : 120,
+            flex: phone ? "1 1 40px" : undefined,
+            minWidth: 32,
+            height: 3,
+            background: color.border,
+            borderRadius: 2,
+          }}
+        >
           <div
             style={{
               width: `${Math.min(100, progress * 100)}%`,
@@ -147,11 +187,13 @@ export function TransportPill({ c }: { c: AlphaTabController }) {
           />
         </div>
 
-        <span style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.textDim }}>
-          {Math.round(c.speed * 100)}%
-        </span>
+        {!phone && (
+          <span style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.textDim }}>
+            {Math.round(c.speed * 100)}%
+          </span>
+        )}
 
-        {c.tracks.length > 1 && (
+        {!phone && c.tracks.length > 1 && (
           <span style={{ display: "flex", gap: 4 }} title="Tracks; open more controls to mix">
             {c.tracks.map((t) => (
               <span
@@ -174,7 +216,7 @@ export function TransportPill({ c }: { c: AlphaTabController }) {
           active={expanded}
           aria-label="More controls"
           aria-expanded={expanded}
-          style={{ borderRadius: 999 }}
+          style={{ borderRadius: 999, flexShrink: 0 }}
         >
           ⋯
         </Button>
