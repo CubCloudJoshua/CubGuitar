@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import { theme } from "./theme";
 import { useAlphaTab } from "./useAlphaTab";
 import { useNarrow } from "./useNarrow";
 import { useEditor } from "./editor/useEditor";
@@ -9,13 +8,12 @@ import { useShareLink } from "./share/useShareLink";
 import { useAuth } from "./auth/useAuth";
 import { collabIdFromLocation, useCollab } from "./collab/useCollab";
 import { EditorBar } from "./editor/EditorBar";
-import { Toolbar } from "./components/Toolbar";
-import { TrackMixer } from "./components/TrackMixer";
+import { TransportPill } from "./components/TransportPill";
 import { ExportMenu } from "./components/ExportMenu";
 import { LibraryPanel } from "./library/LibraryPanel";
 import { AccountPanel } from "./auth/AccountPanel";
 import { ErrorBanner, ImportNoticeBanner, ShareLinkBar } from "./components/Banners";
-import { Button, buttonStyle, color, font, Label, TextField, typeScale } from "@cubscore/design";
+import { Button, buttonStyle, color, Drawer, font, motion, TextField, typeScale } from "@cubscore/design";
 
 const headerButton = buttonStyle("outline");
 
@@ -39,7 +37,7 @@ export function App() {
   // Opened via a collab link: join the room and land in the editor. Guests
   // do not autosave (no library entry); the host's autosave owns the doc.
   const { join } = collab;
-  const { setMode } = lib;
+  const { setMode, setLibraryOpen } = lib;
   useEffect(() => {
     const roomId = collabIdFromLocation();
     if (!roomId) return;
@@ -47,11 +45,15 @@ export function App() {
     setMode("edit");
   }, [join, setMode]);
 
-  // Space toggles playback everywhere except form fields and focused buttons,
-  // in the player, the editor, and shared views alike.
+  // Space toggles playback; Cmd/Ctrl+L toggles the library drawer.
   const { playPause } = c;
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
+      if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "l") {
+        ev.preventDefault();
+        setLibraryOpen((v) => !v);
+        return;
+      }
       if (ev.code !== "Space" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
       const target = ev.target as HTMLElement | null;
       if (target && /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(target.tagName)) return;
@@ -60,18 +62,20 @@ export function App() {
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [playPause]);
+  }, [playPause, setLibraryOpen]);
 
-  const showLibrary = !shared.active && (!narrow || lib.libraryOpen);
   const editing = !shared.active && lib.mode === "edit";
   const currentEntry = lib.entries.find((e) => e.id === lib.currentId);
   const canEditCurrent = !shared.active && currentEntry?.core != null;
   const canShare = !shared.active && currentEntry !== undefined;
   const error = shared.loadError ?? shareLink.error;
+  // Playback dims the chrome so the score carries the screen; editing keeps
+  // its tools at full strength since play-along editing is a real workflow.
+  const chromeOpacity = c.playing && !editing ? 0.35 : 1;
 
   return (
     <div
-      style={{ maxWidth: 1280, margin: "0 auto", padding: narrow ? 10 : 16 }}
+      style={{ maxWidth: 1280, margin: "0 auto", padding: narrow ? 10 : 16, paddingBottom: 110 }}
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
@@ -79,22 +83,41 @@ export function App() {
         if (file) void lib.importFile(file);
       }}
     >
-      <header style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-        <h1 style={{ color: theme.accent, fontSize: narrow ? 18 : 24, margin: 0, letterSpacing: 1 }}>
+      <header
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 10,
+          flexWrap: "wrap",
+          opacity: chromeOpacity,
+          transition: `opacity ${motion.base}`,
+        }}
+      >
+        <h1
+          style={{
+            color: color.accent,
+            fontFamily: font.display,
+            fontSize: narrow ? 20 : 26,
+            margin: 0,
+            letterSpacing: 1.5,
+            fontWeight: 400,
+          }}
+        >
           CubScore
         </h1>
         {c.score && !narrow && (
-          <span style={{ fontSize: 13, color: theme.text }}>
+          <span style={{ fontSize: 13, color: color.text }}>
             {editing ? editor.score.title : c.score.title}
-            {!editing && c.score.artist && <span style={{ color: theme.textDim }}> — {c.score.artist}</span>}
-            <span style={{ color: theme.textDim }}> · {c.score.barCount} bars</span>
+            {!editing && c.score.artist && <span style={{ color: color.textDim }}> — {c.score.artist}</span>}
+            <span style={{ color: color.textDim }}> · {c.score.barCount} bars</span>
           </span>
         )}
         {shared.active && (
           <span
             style={{
-              fontFamily: theme.mono, fontSize: 11, color: theme.bg, background: theme.accent,
-              padding: "3px 8px", letterSpacing: 0.5,
+              fontFamily: font.mono, fontSize: typeScale.sm, color: color.bg, background: color.accent,
+              padding: "3px 8px", letterSpacing: 0.5, borderRadius: 4,
             }}
           >
             SHARED SCORE
@@ -115,8 +138,10 @@ export function App() {
           )
         )}
         <span style={{ flex: 1 }} />
-        {!shared.active && narrow && (
-          <Button variant="outline" onClick={() => lib.setLibraryOpen((v) => !v)}>LIBRARY</Button>
+        {!shared.active && (
+          <Button variant="outline" onClick={() => lib.setLibraryOpen((v) => !v)} title="Library (Cmd+L)">
+            LIBRARY
+          </Button>
         )}
         {!shared.active && <Button variant="outline" onClick={lib.startNewScore}>NEW</Button>}
         {!editing && canEditCurrent && (
@@ -182,11 +207,11 @@ export function App() {
         <div
           style={{
             display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8,
-            background: theme.panel, border: `1px solid ${theme.accent}`,
-            padding: 10, marginBottom: 10, fontFamily: theme.mono, fontSize: 11,
+            background: color.raised, border: `1px solid ${color.accent}`, borderRadius: 8,
+            padding: 10, marginBottom: 10, fontFamily: font.mono, fontSize: typeScale.sm,
           }}
         >
-          <span style={{ color: theme.accent, fontWeight: 700 }}>LIVE SESSION</span>
+          <span style={{ color: color.accent, fontWeight: 700 }}>LIVE SESSION</span>
           <TextField
             readOnly
             value={collab.url}
@@ -200,7 +225,7 @@ export function App() {
           >
             COPY
           </Button>
-          <span style={{ color: theme.textDim }}>
+          <span style={{ color: color.textDim }}>
             {collab.peers.length} in session
             {[...collab.cursors.values()]
               .map((p) => ` · ${p.name} at bar ${p.bar + 1}, beat ${p.beat + 1}`)
@@ -216,18 +241,53 @@ export function App() {
         <ImportNoticeBanner notice={lib.importNotice} onDismiss={() => lib.setImportNotice(null)} />
       )}
 
-      <Toolbar c={c} />
       {c.error && <ErrorBanner message={c.error} />}
 
-      <div
+      <main style={{ minWidth: 0 }}>
+        <div
+          style={{
+            background: color.raised,
+            border: `1px solid ${editing ? color.accent : color.hairline}`,
+            borderRadius: 8,
+            padding: 8,
+            position: "relative",
+            minHeight: 200,
+            overflowX: "auto",
+          }}
+        >
+          {c.rendering && (
+            <span
+              style={{
+                position: "absolute", top: 8, right: 12,
+                fontFamily: font.mono, fontSize: typeScale.sm, color: color.textDim,
+              }}
+            >
+              rendering…
+            </span>
+          )}
+          <div ref={c.hostRef} />
+        </div>
+      </main>
+
+      <p
         style={{
-          display: "grid",
-          gridTemplateColumns: showLibrary && !narrow ? "260px minmax(0, 1fr)" : "minmax(0, 1fr)",
-          gap: 10,
-          alignItems: "start",
+          fontFamily: font.mono,
+          fontSize: typeScale.sm,
+          color: color.textDim,
+          lineHeight: 1.7,
+          opacity: chromeOpacity,
+          transition: `opacity ${motion.base}`,
         }}
       >
-        {showLibrary && (
+        {shared.active
+          ? "Shared score. Click a note to seek, drag to select a loop region, use the speed trainer to practice. Nothing to install."
+          : editing
+            ? "Editing. Type 0-9 to enter frets on the highlighted string, arrows to move, +/− to add or remove beats, Enter for a new bar, Ctrl+Z to undo. Work autosaves to the library."
+            : "Drop a .gp3/.gp4/.gp5/.gpx/.gp file anywhere to import it. Click a note to seek. Drag across the score to select a loop region, then press LOOP. NEW starts an editable score."}
+      </p>
+
+      {!shared.active && (
+        <Drawer open={lib.libraryOpen} onClose={() => lib.setLibraryOpen(false)} label="Library">
           <LibraryPanel
             entries={lib.entries}
             currentId={lib.currentId}
@@ -235,39 +295,10 @@ export function App() {
             onDelete={(id) => void lib.removeEntry(id)}
             onImportClick={() => fileInputRef.current?.click()}
           />
-        )}
+        </Drawer>
+      )}
 
-        <main style={{ minWidth: 0 }}>
-          {!editing && <TrackMixer c={c} />}
-          <div
-            style={{
-              background: theme.panel,
-              border: `1px solid ${editing ? theme.accent : theme.border}`,
-              padding: 8, position: "relative", minHeight: 200, overflowX: "auto",
-            }}
-          >
-            {c.rendering && (
-              <span
-                style={{
-                  position: "absolute", top: 8, right: 12,
-                  fontFamily: theme.mono, fontSize: 11, color: theme.textDim,
-                }}
-              >
-                rendering…
-              </span>
-            )}
-            <div ref={c.hostRef} />
-          </div>
-        </main>
-      </div>
-
-      <p style={{ fontFamily: theme.mono, fontSize: 11, color: theme.textDim, lineHeight: 1.7 }}>
-        {shared.active
-          ? "Shared score. Click a note to seek, drag to select a loop region, use the speed trainer to practice. Nothing to install."
-          : editing
-            ? "Editing. Type 0-9 to enter frets on the highlighted string, arrows to move, +/− to add or remove beats, Enter for a new bar, Ctrl+Z to undo. Work autosaves to the library."
-            : "Drop a .gp3/.gp4/.gp5/.gpx/.gp file anywhere to import it. Click a note to seek. Drag across the score to select a loop region, then press LOOP. NEW starts an editable score."}
-      </p>
+      <TransportPill c={c} />
     </div>
   );
 }

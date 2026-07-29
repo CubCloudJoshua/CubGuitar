@@ -166,8 +166,8 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     editorEntryRef.current = target;
     setCurrentId(target.id);
     setMode("edit");
-    if (narrow) setLibraryOpen(false);
-  }, [editor, narrow]);
+    setLibraryOpen(false);
+  }, [editor]);
 
   const importFile = useCallback(
     async (file: File) => {
@@ -182,9 +182,9 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
         pendingRef.current = { id: newId(), format: "gp", bytes, tex: null, fileName: file.name, addedAt: Date.now() };
         loadBytes(bytes);
       }
-      if (narrow) setLibraryOpen(false);
+      setLibraryOpen(false);
     },
-    [loadTex, loadBytes, narrow],
+    [loadTex, loadBytes],
   );
 
   const openEntry = useCallback(
@@ -205,9 +205,9 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       }
       await putEntry({ ...entry, openedAt: Date.now() });
       await refresh();
-      if (narrow) setLibraryOpen(false);
+      setLibraryOpen(false);
     },
-    [editor, loadTex, loadBytes, refresh, narrow],
+    [editor, loadTex, loadBytes, refresh],
   );
 
   const removeEntry = useCallback(

@@ -4,8 +4,9 @@
  * add or alter text/aria — behavior-testing selectors must keep working
  * through any restyle.
  */
+import { useEffect } from "react";
 import type { ButtonHTMLAttributes, CSSProperties, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
-import { color, font, radius, typeScale } from "./tokens";
+import { color, font, motion, radius, typeScale } from "./tokens";
 
 export type ButtonVariant = "outline" | "solid" | "ghost" | "danger";
 
@@ -60,13 +61,25 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: "sm" | "md";
 }
 
-export function Button({ variant = "ghost", active = false, size = "md", style, disabled, ...rest }: ButtonProps) {
+export function Button({ variant = "ghost", active = false, size = "md", style, disabled, onMouseUp, ...rest }: ButtonProps) {
   const base = buttonStyle(variant, active, disabled ?? false);
   if (size === "sm") {
     base.fontSize = typeScale.sm;
     base.padding = "5px 9px";
   }
-  return <button {...rest} disabled={disabled} style={{ ...base, ...style }} />;
+  return (
+    <button
+      {...rest}
+      disabled={disabled}
+      // Mouse clicks release focus so the spacebar stays the transport key;
+      // keyboard focus is untouched, so tab-and-space activation still works.
+      onMouseUp={(e) => {
+        e.currentTarget.blur();
+        onMouseUp?.(e);
+      }}
+      style={{ ...base, ...style }}
+    />
+  );
 }
 
 const fieldBase: CSSProperties = {
@@ -108,6 +121,73 @@ export function Label({ children, style }: { children: ReactNode; style?: CSSPro
 /** Vertical rule between control groups. */
 export function VDivider() {
   return <span style={{ width: 1, height: 18, background: color.border, alignSelf: "center" }} />;
+}
+
+/**
+ * Edge drawer with backdrop. Always mounted so the slide transition runs;
+ * inert when closed. Motion explains where the panel lives (UI-DESIGN.md 1.5).
+ */
+export function Drawer({
+  open,
+  onClose,
+  children,
+  width = 300,
+  label,
+}: {
+  open: boolean;
+  onClose: () => void;
+  children: ReactNode;
+  width?: number;
+  label: string;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        aria-hidden={!open}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.55)",
+          opacity: open ? 1 : 0,
+          pointerEvents: open ? "auto" : "none",
+          transition: `opacity ${motion.base}`,
+          zIndex: 40,
+        }}
+      />
+      <div
+        role="dialog"
+        aria-label={label}
+        aria-hidden={!open}
+        style={{
+          position: "fixed",
+          top: 0,
+          bottom: 0,
+          left: 0,
+          width,
+          maxWidth: "85vw",
+          background: color.raised,
+          borderRight: `1px solid ${color.hairline}`,
+          transform: open ? "translateX(0)" : "translateX(-102%)",
+          transition: `transform ${motion.base}`,
+          zIndex: 41,
+          overflowY: "auto",
+          padding: 10,
+        }}
+      >
+        {children}
+      </div>
+    </>
+  );
 }
 
 /** Raised surface. `accent` marks panels that demand attention; `as` keeps semantics. */
