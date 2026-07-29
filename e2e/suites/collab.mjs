@@ -2,7 +2,7 @@
  * Realtime collaboration: two browsers, one score. Convergence to a
  * byte-identical rendered document is the assertion that matters.
  */
-import { appReady, newDevice, scoreText } from "../harness.mjs";
+import { appReady, newDevice, scoreText, withLibrary } from "../harness.mjs";
 
 export const name = "collab";
 
@@ -64,4 +64,28 @@ export async function run({ browser, baseUrl, recorder }) {
   await host.page.waitForTimeout(1400);
   recorder.check("Ctrl+Z is inert during a live session", (await scoreText(host.page)) === beforeUndo);
   recorder.check("still converged after the undo attempt", (await scoreText(host.page)) === (await scoreText(guest.page)));
+
+  // A guest owns no library entry, so they must be offered a way to keep the
+  // work; the host, whose entry autosaves, must not see the offer.
+  recorder.check(
+    "guest is offered a copy to keep",
+    (await guest.page.getByRole("button", { name: "KEEP A COPY" }).count()) === 1,
+  );
+  recorder.check(
+    "host is not offered one",
+    (await host.page.getByRole("button", { name: "KEEP A COPY" }).count()) === 0,
+  );
+
+  await guest.page.getByRole("button", { name: "KEEP A COPY" }).click();
+  await guest.page.waitForTimeout(2000);
+  recorder.check(
+    "the offer disappears once taken",
+    (await guest.page.getByRole("button", { name: "KEEP A COPY" }).count()) === 0,
+  );
+
+  // The kept copy survives the session ending and a reload.
+  await guest.page.reload({ waitUntil: "networkidle" });
+  await appReady(guest.page);
+  const kept = await withLibrary(guest.page, (aside) => aside.innerText());
+  recorder.check("the guest's copy is in their library after reload", kept.includes("New Score"), kept.slice(0, 120));
 }

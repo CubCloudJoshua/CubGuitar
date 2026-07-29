@@ -26,31 +26,38 @@ interface PendingImport {
 export function useLibrary(c: AlphaTabController, editor: EditorController, narrow: boolean, disabled: boolean) {
   const { loadTex, loadBytes } = c;
   const pendingRef = useRef<PendingImport | null>(null);
-  /** Library row the editor autosaves into. */
-  const editorEntryRef = useRef<{ id: string; addedAt: number } | null>(null);
 
   const [mode, setMode] = useState<Mode>("play");
   const [entries, setEntries] = useState<LibraryEntry[]>([]);
   const [currentId, setCurrentId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [importNotice, setImportNotice] = useState<ImportReport | null>(null);
+  /**
+   * Library row the editor autosaves into. State rather than a ref so the
+   * autosave effect re-runs the moment ownership changes and the UI can offer
+   * a guest a way to adopt the document.
+   */
+  const [editorEntry, setEditorEntry] = useState<{ id: string; addedAt: number } | null>(null);
 
   const refresh = useCallback(async () => {
     setEntries(await listEntries());
   }, []);
 
-  // Boot: seed the demo into an empty library, or reopen the latest score.
+  // Boot. The entry list always loads: a shared-view or collab visitor still
+  // has their own library and must be able to see it. Only the *opening* of a
+  // score is suppressed for them, because their document arrives from the
+  // share payload or the collab room and a second load would race it.
   useEffect(() => {
-    if (disabled) return;
     void (async () => {
       const existing = await listEntries();
+      setEntries(existing);
+      if (disabled) return;
       if (existing.length === 0) {
         pendingRef.current = {
           id: newId(), format: "altex", bytes: null, tex: DEMO_SCORE, fileName: null, addedAt: Date.now(),
         };
         loadTex(DEMO_SCORE);
       } else {
-        setEntries(existing);
         const first = existing[0];
         if (first) {
           setCurrentId(first.id);
@@ -122,7 +129,7 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
   const editorScore = editor.score;
   useEffect(() => {
     if (mode !== "edit") return;
-    const target = editorEntryRef.current;
+    const target = editorEntry;
     if (!target) return;
     const timer = setTimeout(() => {
       void (async () => {
@@ -146,24 +153,37 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       })();
     }, 1000);
     return () => clearTimeout(timer);
-  }, [mode, editorScore, editorTex, refresh]);
+  }, [mode, editorEntry, editorScore, editorTex, refresh]);
 
   /** Converts the open imported score into an editable document. */
   const editImported = useCallback(() => {
     const entry = entries.find((e) => e.id === currentId);
     if (!entry?.core) return;
     editor.loadScore(JSON.parse(entry.core) as CoreScore);
-    editorEntryRef.current = { id: entry.id, addedAt: entry.addedAt };
+    setEditorEntry({ id: entry.id, addedAt: entry.addedAt });
     setImportNotice(entry.report ? (JSON.parse(entry.report) as ImportReport) : null);
     setMode("edit");
     void putEntry({ ...entry, authored: true, openedAt: Date.now() }).then(refresh);
   }, [entries, currentId, editor, refresh]);
 
+  /**
+   * Adopts whatever the editor currently holds into this device's library and
+   * lets autosave take over. Collaboration guests have no entry of their own —
+   * the host's copy owns the document — so without this their contributions
+   * vanish when the tab closes.
+   */
+  const adoptEditorScore = useCallback(() => {
+    const target = { id: newId(), addedAt: Date.now() };
+    setEditorEntry(target);
+    setCurrentId(target.id);
+    setMode("edit");
+  }, []);
+
   const startNewScore = useCallback(() => {
     editor.newScore();
     setImportNotice(null);
     const target = { id: newId(), addedAt: Date.now() };
-    editorEntryRef.current = target;
+    setEditorEntry(target);
     setCurrentId(target.id);
     setMode("edit");
     setLibraryOpen(false);
@@ -194,7 +214,7 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       if (entry.authored && entry.core) {
         // Authored here, so it reopens in the editor.
         editor.loadScore(JSON.parse(entry.core) as CoreScore);
-        editorEntryRef.current = { id: entry.id, addedAt: entry.addedAt };
+        setEditorEntry({ id: entry.id, addedAt: entry.addedAt });
         setMode("edit");
       } else {
         // Imported files open in the player, where alphaTab renders the
@@ -214,13 +234,13 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     async (id: string) => {
       await deleteEntry(id);
       if (id === currentId) setCurrentId(null);
-      if (editorEntryRef.current?.id === id) {
-        editorEntryRef.current = null;
+      if (editorEntry?.id === id) {
+        setEditorEntry(null);
         setMode("play");
       }
       await refresh();
     },
-    [currentId, refresh],
+    [currentId, editorEntry, refresh],
   );
 
   return {
@@ -233,6 +253,8 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     importNotice,
     setImportNotice,
     refresh,
+    adoptEditorScore,
+    ownsEditorEntry: editorEntry !== null,
     editImported,
     startNewScore,
     importFile,

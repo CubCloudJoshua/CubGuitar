@@ -192,6 +192,13 @@ export function App() {
             {shareLink.busy ? "SHARING…" : "SHARE"}
           </Button>
         )}
+        {/* A collab guest has no entry of their own: the host's copy owns the
+            document. Without this their contributions die with the tab. */}
+        {editing && !lib.ownsEditorEntry && (
+          <Button variant="outline" onClick={lib.adoptEditorScore} title="Keep a copy in this device's library">
+            KEEP A COPY
+          </Button>
+        )}
         {!shared.active && (
           <Button variant="outline" onClick={() => fileInputRef.current?.click()}>OPEN</Button>
         )}
