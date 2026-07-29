@@ -100,4 +100,35 @@ export async function run({ browser, baseUrl, recorder }) {
   await settle(1800);
   recorder.check("authored score reopens in the editor", (await page.locator("text=/^EDIT$/").count()) === 1);
   recorder.check("entered notes survived", (await scoreText(page)).includes("12"));
+
+  // Starting a new score inside the autosave's debounce window must not cost the
+  // outgoing score its last edits. The exit flush decides what to save
+  // synchronously; when it read the target later instead, NEW wrote the outgoing
+  // document into the *incoming* row and the outgoing one kept nothing.
+  await page.getByRole("button", { name: "NEW", exact: true }).click();
+  await settle(1400);
+  await page.keyboard.press("Digit6");
+  await page.keyboard.press("ArrowRight");
+  await page.keyboard.press("Digit4");
+  // Deliberately shorter than the one-second debounce: nothing has been written
+  // yet, so only the exit flush can save these.
+  await page.waitForTimeout(250);
+  await page.getByRole("button", { name: "NEW", exact: true }).click();
+  await settle(2600);
+
+  const rows = await withLibrary(page, (aside) => aside.innerText());
+  recorder.check("the second new score was added too", (rows.match(/New Score/g) ?? []).length >= 2, rows.slice(0, 160));
+
+  // The most recently opened row is the blank one, so the row before it is the
+  // score whose edits were still pending when NEW was pressed.
+  await page.getByRole("button", { name: "LIBRARY", exact: true }).click();
+  await settle(700);
+  await page.locator('button[title*="New Score"]').nth(1).click();
+  await settle(2200);
+  const reopened = await scoreText(page);
+  recorder.check(
+    "edits pending when NEW was pressed survived on their own score",
+    reopened.includes("6") && reopened.includes("4"),
+    reopened.slice(0, 120),
+  );
 }

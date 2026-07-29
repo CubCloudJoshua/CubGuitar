@@ -169,12 +169,7 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
    *    editor states cannot be merged yet, so this saves alongside their work
    *    instead of clobbering it.
    */
-  const writeNow = useCallback(async () => {
-    const target = editorEntryRef.current;
-    if (!target) return;
-    const { score, tex } = latestRef.current;
-    if (tex === savedTexRef.current || savedTexRef.current === AWAIT_BASELINE) return;
-
+  const writeNow = useCallback(async (target: EditorTarget, score: CoreScore, tex: string) => {
     const existing = await getEntry(target.id);
     if (!existing && target.rev > 0) return;
 
@@ -204,10 +199,10 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       bars: score.tracks[0]?.bars.length ?? 0,
     };
     await putEntry(entry);
-    // The awaits above yield. Callers that flush on the way out (new score,
-    // open, import, leave) point the editor at a different row in the same
-    // tick, so adopting this write as "the editor's saved state" would send
-    // the *next* document into the row we just left.
+    // Only adopt this write as "the editor's saved state" if the editor is still
+    // on the row it was written for. Otherwise the next document would be
+    // measured against the outgoing one's baseline and the new row would be
+    // pointed at the old one's revision.
     if (editorEntryRef.current === target) {
       savedTexRef.current = tex;
       setEditorTarget({ id, addedAt, rev: entry.rev });
@@ -217,16 +212,30 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
   }, [refresh, setEditorTarget]);
 
   /**
-   * Serializes writes. Two flushes in flight at once — the debounce timer firing
-   * just as the user clicks away, say — each read the row before the other wrote
-   * it, so the second saw the first's revision as a foreign writer and forked a
-   * duplicate copy of the score. Queued, the second one finds the document
-   * already saved and does nothing.
+   * Decides what to save now, then queues the write.
+   *
+   * What to save is read here, synchronously, and what is read is what gets
+   * written. That split matters: the queue defers the write to a later tick, and
+   * callers change the editor's target in the same tick they flush (NEW, open,
+   * import). Reading the target inside the queued task therefore picked up the
+   * *incoming* row — so NEW wrote the outgoing document into the new score's row
+   * and the outgoing row never got the user's last edits at all. The queue
+   * serializes writing, not deciding.
+   *
+   * Queued because two flushes in flight at once — the debounce timer firing
+   * just as the user clicks away — each read the row before the other wrote it,
+   * so the second saw the first's revision as a foreign writer and forked a
+   * duplicate copy of the score.
    */
   const savingRef = useRef<Promise<void>>(Promise.resolve());
   const flushSave = useCallback((): Promise<void> => {
+    const target = editorEntryRef.current;
+    const { score, tex } = latestRef.current;
+    const clean = tex === savedTexRef.current || savedTexRef.current === AWAIT_BASELINE;
+    if (!target || clean) return savingRef.current;
+
     const attempt = () =>
-      writeNow().catch((err) => {
+      writeNow(target, score, tex).catch((err) => {
         // A failed write must not break the chain, or every later save is
         // skipped and the user loses everything after the first hiccup.
         console.warn("autosave failed", err);
