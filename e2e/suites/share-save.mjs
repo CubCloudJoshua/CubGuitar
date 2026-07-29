@@ -4,8 +4,13 @@ import { appReady, newDevice, scoreText, withLibrary } from "../harness.mjs";
 export const name = "share-save";
 
 export async function run({ browser, baseUrl, recorder }) {
-  // Teacher shares the seeded demo.
-  const teacher = await newDevice(browser, recorder, "teacher");
+  // Teacher shares the seeded demo. Clipboard access is granted explicitly so
+  // the automatic copy is actually exercised rather than left to whatever the
+  // runner's browser happens to permit.
+  const teacher = await newDevice(browser, recorder, "teacher", { width: 1400, height: 1000 }, [
+    "clipboard-read",
+    "clipboard-write",
+  ]);
   await teacher.page.goto(baseUrl, { waitUntil: "networkidle" });
   await appReady(teacher.page);
   const beforeShare = await scoreText(teacher.page);
@@ -30,10 +35,50 @@ export async function run({ browser, baseUrl, recorder }) {
     await teacher.page.locator('.at-surface svg:not([aria-hidden="true"])').count(),
     systemsBefore,
   );
+  // Whether the browser allows a clipboard write is not the app's decision, so
+  // the check is that the card is honest about which happened: it either says
+  // COPIED and offers nothing further, or it admits it could not and offers the
+  // button. Silently claiming a copy that did not happen is the failure.
+  const copiedShown = (await teacher.page.locator("text=COPIED").count()) === 1;
+  const copyOffered = (await teacher.page.getByRole("button", { name: "COPY" }).count()) === 1;
   recorder.check(
-    "the link is copied without asking",
-    (await teacher.page.locator("text=COPIED").count()) === 1,
+    "the card either copied the link or offers to",
+    copiedShown !== copyOffered,
+    `copied=${copiedShown} button=${copyOffered}`,
   );
+  if (copiedShown) {
+    recorder.check(
+      "the link really is on the clipboard",
+      (await teacher.page.evaluate(() => navigator.clipboard.readText())) === url,
+    );
+  }
+
+  // And the other branch, forced rather than left to the environment. A browser
+  // that refuses the write — an insecure origin, a policy, a runner without the
+  // permission — must offer the button rather than claim a copy that never
+  // happened. This is the path CI takes.
+  const refused = await newDevice(browser, recorder, "clipboard-refused");
+  await refused.page.addInitScript(() => {
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error("denied")) },
+    });
+  });
+  await refused.page.goto(baseUrl, { waitUntil: "networkidle" });
+  await appReady(refused.page);
+  await refused.page.getByRole("button", { name: "SHARE", exact: true }).click();
+  await refused.page.waitForSelector('input[aria-label="Share link"]', { timeout: 20_000 });
+  await refused.page.waitForTimeout(900);
+  recorder.check(
+    "a refused copy does not claim to have copied",
+    (await refused.page.locator("text=COPIED").count()) === 0,
+  );
+  recorder.equal(
+    "a refused copy offers the button instead",
+    await refused.page.getByRole("button", { name: "COPY" }).count(),
+    1,
+  );
+  await refused.page.close();
 
   // Student opens it cold: no cookies, no library.
   const student = await newDevice(browser, recorder, "student", { width: 1300, height: 900 });

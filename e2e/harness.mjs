@@ -107,9 +107,25 @@ export async function openPalette(page) {
   await page.waitForSelector('input[aria-label="Command search"]', { timeout: 8000 });
 }
 
-/** A fresh isolated browser context: no cookies, no IndexedDB. Acts as a device. */
-export async function newDevice(browser, recorder, tag, viewport = { width: 1400, height: 1000 }) {
-  const context = await browser.newContext({ viewport, acceptDownloads: true });
+/**
+ * A fresh isolated browser context: no cookies, no IndexedDB. Acts as a device.
+ *
+ * `permissions` is opt-in because granting them changes what is being tested:
+ * the share card copies the link automatically, and whether that is allowed is
+ * the browser's decision, not the app's.
+ */
+export async function newDevice(
+  browser,
+  recorder,
+  tag,
+  viewport = { width: 1400, height: 1000 },
+  permissions = undefined,
+) {
+  const context = await browser.newContext({
+    viewport,
+    acceptDownloads: true,
+    ...(permissions ? { permissions } : {}),
+  });
   const page = await context.newPage();
   recorder.watch(page, tag);
   return { context, page };
