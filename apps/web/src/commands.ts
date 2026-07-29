@@ -21,6 +21,7 @@ interface CommandDeps {
   shareCurrent: () => void;
   openFilePicker: () => void;
   toggleAccount: () => void;
+  startPerforming: () => void;
 }
 
 export function useCommands(deps: CommandDeps): Command[] {
@@ -57,6 +58,15 @@ export function useCommands(deps: CommandDeps): Command[] {
         });
       }
       add({ id: "account", title: "Account and sync", section: "Score", run: deps.toggleAccount });
+      if (c.score) {
+        add({
+          id: "perform",
+          title: "Perform mode (stage view)",
+          section: "Score",
+          hint: "Esc leaves",
+          run: deps.startPerforming,
+        });
+      }
     }
 
     if (c.score) {

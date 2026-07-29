@@ -11,13 +11,14 @@ import { collabIdFromLocation, useCollab } from "./collab/useCollab";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
 import { BarMarkings } from "./editor/BarMarkings";
+import { PerformBar, Setlist, TapZone, turnPage, usePerformShell } from "./perform/PerformMode";
 import { TransportPill } from "./components/TransportPill";
 import { ExportMenu } from "./components/ExportMenu";
 import { LibraryPanel } from "./library/LibraryPanel";
 import { AccountPanel } from "./auth/AccountPanel";
 import { ErrorBanner, ImportNoticeBanner, ShareLinkBar } from "./components/Banners";
 import { useCommands } from "./commands";
-import { Button, buttonStyle, color, CommandPalette, Drawer, font, motion, TextField, typeScale } from "@cubscore/design";
+import { Button, buttonStyle, color, CommandPalette, Drawer, font, motion, stage, TextField, typeScale } from "@cubscore/design";
 
 const headerButton = buttonStyle("outline");
 
@@ -38,6 +39,10 @@ export function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [accountOpen, setAccountOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  // Perform mode restyles this shell rather than replacing it: see
+  // perform/PerformMode.tsx for why the score element must not move.
+  const [performing, setPerforming] = useState(false);
+  const [scroller, setScroller] = useState<HTMLElement | null>(null);
 
   // Tell the library whose it is. Every read of the library waits for this, so
   // that a signed-in user is never briefly shown an empty library — which
@@ -112,24 +117,52 @@ export function App() {
     shareCurrent: () => void shareLink.share(currentEntry),
     openFilePicker: () => fileInputRef.current?.click(),
     toggleAccount: () => setAccountOpen((v) => !v),
+    startPerforming: () => {
+      if (editing) lib.leaveEditor();
+      setPerforming(true);
+    },
   });
   // Playback dims the chrome so the score carries the screen; editing keeps
   // its tools at full strength since play-along editing is a real workflow.
   const chromeOpacity = c.playing && !editing ? 0.35 : 1;
 
+  usePerformShell({
+    active: performing,
+    scroller,
+    onExit: () => setPerforming(false),
+    seekSeconds: c.seekSeconds,
+    setStageEngraving: c.setStageEngraving,
+    setScrollElement: c.setScrollElement,
+    zoom: c.zoom,
+    setZoom: c.setZoom,
+  });
+
   return (
     <div
-      style={{ maxWidth: 1280, margin: "0 auto", padding: narrow ? 10 : 16, paddingBottom: 110 }}
+      style={
+        performing
+          ? {
+              position: "fixed",
+              inset: 0,
+              background: stage.bg,
+              display: "flex",
+              flexDirection: "column",
+              padding: 0,
+              zIndex: 50,
+            }
+          : { maxWidth: 1280, margin: "0 auto", padding: narrow ? 10 : 16, paddingBottom: 110 }
+      }
       onDragOver={(e) => e.preventDefault()}
       onDrop={(e) => {
         e.preventDefault();
+        if (performing) return;
         const file = e.dataTransfer.files[0];
         if (file) void lib.importFile(file);
       }}
     >
       <header
         style={{
-          display: "flex",
+          display: performing ? "none" : "flex",
           alignItems: "center",
           gap: 10,
           marginBottom: 10,
@@ -196,6 +229,21 @@ export function App() {
         )}
         {editing && collab.status === "off" && (
           <Button variant="outline" onClick={collab.start}>COLLAB</Button>
+        )}
+        {/* Perform is a reading mode, so it leaves the editor on the way in:
+            stage-dark with an edit caret in it would invite typing you cannot
+            see the tools for. */}
+        {!shared.active && c.score && (
+          <Button
+            variant="outline"
+            onClick={() => {
+              if (editing) lib.leaveEditor();
+              setPerforming(true);
+            }}
+            title="Stage view: big readout, tap to turn pages, Escape to leave"
+          >
+            PERFORM
+          </Button>
         )}
         {collab.status === "live" && (
           <Button
@@ -287,25 +335,38 @@ export function App() {
       {collab.error && <ErrorBanner message={collab.error} />}
       {error && <ErrorBanner message={error} />}
 
-      {editing && <EditorBar e={editor} enabled={editing} allowHistory={collab.status !== "live"} />}
-      {editing && lib.importNotice && lib.importNotice.unsupported.length > 0 && (
+      {editing && !performing && (
+        <EditorBar e={editor} enabled={editing && !performing} allowHistory={collab.status !== "live"} />
+      )}
+      {editing && !performing && lib.importNotice && lib.importNotice.unsupported.length > 0 && (
         <ImportNoticeBanner notice={lib.importNotice} onDismiss={() => lib.setImportNotice(null)} />
       )}
 
-      {c.error && <ErrorBanner message={c.error} />}
+      {c.error && !performing && <ErrorBanner message={c.error} />}
 
-      <main style={{ minWidth: 0 }}>
+      <main
+        style={
+          performing
+            ? { minWidth: 0, flex: 1, minHeight: 0, position: "relative", display: "flex" }
+            : { minWidth: 0 }
+        }
+      >
         <div
           style={{
-            background: color.raised,
-            border: `1px solid ${editing ? color.accent : color.hairline}`,
-            borderRadius: 8,
+            background: performing ? stage.bg : color.raised,
+            border: performing ? "none" : `1px solid ${editing ? color.accent : color.hairline}`,
+            borderRadius: performing ? 0 : 8,
             padding: 8,
             position: "relative",
-            minHeight: 200,
+            minHeight: performing ? 0 : 200,
             display: "flex",
             gap: 8,
-            alignItems: "flex-start",
+            // flex-start keeps the track rail from stretching to the score's
+            // height. In Perform the score's own box has to be the thing with a
+            // bounded height, or its overflow never becomes a scroller and the
+            // page grows instead of turning.
+            alignItems: performing ? "stretch" : "flex-start",
+            ...(performing ? { flex: 1, minWidth: 0 } : {}),
           }}
         >
           {c.rendering && (
@@ -322,7 +383,7 @@ export function App() {
               never moves the music. On a phone it costs an eighth of the width,
               so it only appears once there is something to switch between; the
               palette still adds tracks. */}
-          {editing && (!narrow || editor.score.tracks.length > 1) && (
+          {editing && !performing && (!narrow || editor.score.tracks.length > 1) && (
             <TrackRail
               tracks={editor.score.tracks}
               activeIndex={editor.cursor.track}
@@ -334,16 +395,62 @@ export function App() {
           {/* The scroller is the score's own box: the rail must stay put when a
               wide arrangement scrolls sideways. The markings overlay is inside
               it and positioned relative to it, so it scrolls with the music it
-              labels instead of floating over a bar it does not belong to. */}
-          <div style={{ flex: 1, minWidth: 0, overflowX: "auto", position: "relative" }}>
+              labels instead of floating over a bar it does not belong to.
+              In Perform mode this same element becomes the vertical scroller
+              alphaTab follows, and the tap zones sit over it. */}
+          <div
+            ref={setScroller}
+            style={
+              performing
+                ? {
+                    flex: 1,
+                    minWidth: 0,
+                    minHeight: 0,
+                    position: "relative",
+                    overflowY: "auto",
+                    overflowX: "hidden",
+                    // Wide margins and deep bottom padding: the last system has
+                    // to be able to reach the middle of the screen.
+                    padding: "0 8% 40vh",
+                  }
+                : { flex: 1, minWidth: 0, overflowX: "auto", position: "relative" }
+            }
+          >
             <div ref={c.hostRef} />
-            {editing && <BarMarkings e={editor} barBoxes={c.barBoxes} />}
+            {editing && !performing && <BarMarkings e={editor} barBoxes={c.barBoxes} />}
           </div>
+          {performing && (
+            <>
+              <TapZone side="left" label="Previous page" onTap={() => turnPage(scroller, -1)} />
+              <TapZone side="right" label="Next page" onTap={() => turnPage(scroller, 1)} />
+            </>
+          )}
         </div>
       </main>
 
+      {performing && (
+        <>
+          <PerformBar
+            playing={c.playing}
+            currentSeconds={c.position.currentTime / 1000}
+            remainingSeconds={Math.max(0, (c.position.endTime - c.position.currentTime) / 1000)}
+            onPlayPause={c.playPause}
+            onStop={c.stop}
+            onExit={() => setPerforming(false)}
+          />
+          {!c.playing && lib.entries.length > 0 && (
+            <Setlist
+              entries={lib.entries}
+              currentId={lib.currentId}
+              onOpen={(entry) => void lib.openEntry(entry)}
+            />
+          )}
+        </>
+      )}
+
       <p
         style={{
+          display: performing ? "none" : "block",
           fontFamily: font.mono,
           fontSize: typeScale.sm,
           color: color.textDim,
@@ -359,7 +466,7 @@ export function App() {
             : "Drop a .gp3/.gp4/.gp5/.gpx/.gp file anywhere to import it. Click a note to seek. Drag to select a loop region, then press LOOP. NEW starts an editable score. Cmd+K for every command."}
       </p>
 
-      {!shared.active && (
+      {!shared.active && !performing && (
         <Drawer open={lib.libraryOpen} onClose={() => lib.setLibraryOpen(false)} label="Library">
           <LibraryPanel
             entries={lib.entries}
@@ -371,7 +478,8 @@ export function App() {
         </Drawer>
       )}
 
-      <TransportPill c={c} />
+      {/* The stage has its own, much larger transport. */}
+      {!performing && <TransportPill c={c} />}
       {/* Mounted fresh on each open: guarantees an empty query and focused
           input regardless of how the previous invocation ended. */}
       {paletteOpen && (

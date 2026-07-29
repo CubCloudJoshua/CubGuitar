@@ -3,7 +3,7 @@
  * design package directly; this mapping keeps older call sites compiling
  * while Phase A conversions land, and disappears with them.
  */
-import { color, font, notation } from "@cubscore/design";
+import { color, font, notation, stageNotation } from "@cubscore/design";
 
 export const theme = {
   bg: color.bg,
@@ -19,3 +19,5 @@ export const theme = {
 
 /** alphaTab render colors, from the design tokens. */
 export const notationColors = notation;
+/** The brighter engraving Perform mode switches to. */
+export const stageNotationColors = stageNotation;

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as alphaTab from "@coderline/alphatab";
-import { notationColors } from "./theme";
+import { notationColors, stageNotationColors } from "./theme";
 
 export interface TrackState {
   index: number;
@@ -57,6 +57,8 @@ export function useAlphaTab() {
   // Ramp settings are read inside an alphaTab event handler that is bound
   // once, so they live in a ref as well as state.
   const rampRef = useRef<RampConfig>(DEFAULT_RAMP);
+  /** Latest track length, for seek clamping outside a render. */
+  const endTimeRef = useRef(0);
 
   const [ready, setReady] = useState(false);
   const [rendering, setRendering] = useState(false);
@@ -149,6 +151,7 @@ export function useAlphaTab() {
     });
 
     api.playerPositionChanged.on((e) => {
+      endTimeRef.current = e.endTime;
       setPosition({ currentTime: e.currentTime, endTime: e.endTime });
     });
 
@@ -235,6 +238,47 @@ export function useAlphaTab() {
     setZoomState(value);
   }, []);
 
+  /** Nudges playback, for the coarse seeking a player wants mid-song. */
+  const seekSeconds = useCallback((delta: number) => {
+    const api = apiRef.current;
+    if (!api) return;
+    const end = endTimeRef.current;
+    const next = api.timePosition + delta * 1000;
+    // Clamped at both ends: seeking past the end silently stops playback, which
+    // reads as the app having crashed when you only meant to skip forward.
+    api.timePosition = Math.max(0, end > 0 ? Math.min(next, end - 1) : next);
+  }, []);
+
+  /**
+   * Tells alphaTab which element to scroll to follow playback. Perform mode
+   * puts the score in its own scroller, and without this the beat cursor walks
+   * off the bottom while the page stays put. Passing null restores the default.
+   */
+  const setScrollElement = useCallback((element: HTMLElement | null) => {
+    const api = apiRef.current;
+    if (!api) return;
+    api.settings.player.scrollElement = element ?? "html,body";
+    api.updateSettings();
+  }, []);
+
+  /**
+   * Swaps the engraving palette. Perform mode is read from across a room under
+   * stage light, so the notation has to be brighter there than the palette
+   * tuned for arm's length in a dark room (UI-DESIGN.md, Perform).
+   */
+  const setStageEngraving = useCallback((on: boolean) => {
+    const api = apiRef.current;
+    if (!api) return;
+    // Through fillFromJson, not by assigning onto settings.display.resources:
+    // those fields are alphaTab Color instances, and writing strings into them
+    // is accepted silently and then ignored by the renderer.
+    api.settings.fillFromJson({
+      display: { resources: on ? stageNotationColors : notationColors },
+    } as alphaTab.json.SettingsJson);
+    api.updateSettings();
+    api.render();
+  }, []);
+
   const setRamp = useCallback((next: RampConfig) => {
     rampRef.current = next;
     setRampState(next);
@@ -298,6 +342,9 @@ export function useAlphaTab() {
     toggleMetronome,
     toggleCountIn,
     setZoom,
+    setStageEngraving,
+    setScrollElement,
+    seekSeconds,
     setRamp,
     setTrackMuted,
     setTrackSolo,

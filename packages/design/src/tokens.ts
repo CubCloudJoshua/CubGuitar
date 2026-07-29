@@ -60,3 +60,28 @@ export const notation = {
   barNumberColor: color.accent,
   scoreInfoColor: color.text,
 } as const;
+
+/**
+ * The stage palette (UI-DESIGN.md, Perform mode). True black rather than
+ * near-black, and engraving pushed to full white with brighter staff lines,
+ * because Perform is read from two metres away under stage light rather than
+ * from arm's length in a dark room. It doubles as the high-contrast
+ * accessibility theme, which is why nothing here is dimmer than the base
+ * palette rather than merely different.
+ */
+export const stage = {
+  bg: "#000000",
+  raised: "#0A0A0A",
+  hairline: "#333333",
+  text: "#FFFFFF",
+  textDim: "#B4B4B4",
+} as const;
+
+export const stageNotation = {
+  mainGlyphColor: stage.text,
+  secondaryGlyphColor: stage.textDim,
+  staffLineColor: "#8A8A8A",
+  barSeparatorColor: "#8A8A8A",
+  barNumberColor: color.accentLive,
+  scoreInfoColor: stage.text,
+} as const;
