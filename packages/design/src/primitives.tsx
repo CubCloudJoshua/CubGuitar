@@ -4,7 +4,7 @@
  * add or alter text/aria — behavior-testing selectors must keep working
  * through any restyle.
  */
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ButtonHTMLAttributes, CSSProperties, InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from "react";
 import { color, font, motion, radius, typeScale } from "./tokens";
 
@@ -121,6 +121,77 @@ export function Label({ children, style }: { children: ReactNode; style?: CSSPro
 /** Vertical rule between control groups. */
 export function VDivider() {
   return <span style={{ width: 1, height: 18, background: color.border, alignSelf: "center" }} />;
+}
+
+/**
+ * A labelled button that reveals a panel anchored beneath it. Closes on
+ * outside click or Escape. This is how controls that do not belong in the
+ * resting UI stay one press away instead of crowding it (UI-DESIGN.md 1.1).
+ */
+export function Popover({
+  label,
+  children,
+  align = "left",
+  width,
+  buttonProps,
+}: {
+  label: ReactNode;
+  children: ReactNode | ((close: () => void) => ReactNode);
+  align?: "left" | "right";
+  width?: number;
+  buttonProps?: ButtonProps;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div ref={wrapRef} style={{ position: "relative" }}>
+      <Button
+        {...buttonProps}
+        active={open || buttonProps?.active === true}
+        aria-expanded={open}
+        onClick={() => setOpen((v) => !v)}
+      >
+        {label}
+      </Button>
+      {open && (
+        <div
+          style={{
+            position: "absolute",
+            top: "calc(100% + 4px)",
+            [align]: 0,
+            zIndex: 20,
+            width,
+            maxWidth: "calc(100vw - 24px)",
+            boxSizing: "border-box",
+            background: color.raisedHigh,
+            border: `1px solid ${color.hairline}`,
+            borderRadius: radius.md,
+            boxShadow: "0 16px 48px rgba(0,0,0,0.6)",
+            padding: 10,
+          }}
+        >
+          {typeof children === "function" ? children(() => setOpen(false)) : children}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
