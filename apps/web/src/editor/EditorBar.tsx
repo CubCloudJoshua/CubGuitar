@@ -54,7 +54,15 @@ function useEditorKeys(e: EditorController, enabled: boolean, allowHistory: bool
     if (!enabled) return;
     const onKey = (ev: KeyboardEvent) => {
       const target = ev.target as HTMLElement | null;
-      if (target && /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName)) return;
+      // Anything focusable that has its own idea of what a key means keeps it.
+      // BUTTON was missing, and Enter here calls preventDefault before adding a
+      // bar — so a keyboard user who tabbed to a duration or articulation
+      // button and pressed Enter got a new bar instead of the control they were
+      // aiming at, and the control never fired at all. Pointer users were
+      // spared only because these buttons blur themselves on release.
+      if (target && /^(INPUT|TEXTAREA|SELECT|BUTTON|A|OPTION)$/.test(target.tagName)) return;
+      if (target?.isContentEditable) return;
+      if (target?.getAttribute("role") === "slider") return;
 
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") {
         ev.preventDefault();

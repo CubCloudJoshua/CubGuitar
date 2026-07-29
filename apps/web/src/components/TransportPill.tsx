@@ -302,6 +302,11 @@ export function TransportPill({ c }: { c: AlphaTabController }) {
             else if (ev.key === "Home") c.seekFraction(0);
             else return;
             ev.preventDefault();
+            // The editor listens for arrows on the document to move its caret.
+            // Without this, one press on this slider both seeked and walked the
+            // caret, so the next fret typed landed in a different beat than the
+            // one the user was looking at.
+            ev.stopPropagation();
           }}
           style={{
             width: phone ? undefined : 120,

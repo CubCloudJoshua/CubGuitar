@@ -36,6 +36,27 @@ export async function run({ browser, baseUrl, recorder }) {
   await appReady(page);
   const deskFill = await glyphFill(page);
 
+  // Set a non-default zoom first, so restoration on exit is testable at all: at
+  // the default it is indistinguishable from doing nothing.
+  // Read from the row the ZOOM label sits in: the pill also shows a percentage
+  // for playback speed, and matching on "N%" alone picks that one up.
+  const zoomReadout = () =>
+    page.evaluate(() => {
+      const label = Array.from(document.querySelectorAll("*")).find(
+        (el) => el.children.length === 0 && el.textContent?.trim() === "ZOOM",
+      );
+      return label?.parentElement?.textContent?.match(/(\d+)%/)?.[1] ?? null;
+    });
+  await page.getByRole("button", { name: "More controls" }).click();
+  await settle(700);
+  await page.getByRole("button", { name: "+", exact: true }).click();
+  await page.getByRole("button", { name: "+", exact: true }).click();
+  await settle(1600);
+  const deskZoom = await zoomReadout();
+  recorder.check("the desk zoom was changed from its default", deskZoom !== null && deskZoom !== "100", String(deskZoom));
+  await page.getByRole("button", { name: "More controls" }).click();
+  await settle(500);
+
   await page.getByRole("button", { name: "PERFORM", exact: true }).click();
   await settle(3000);
 
@@ -168,6 +189,13 @@ export async function run({ browser, baseUrl, recorder }) {
     0,
   );
   recorder.equal("the engraving palette is restored", await glyphFill(page), deskFill);
+  // Perform enlarges the notation for stage distance, so leaving has to give the
+  // user back the zoom they chose rather than the one the app started with.
+  await page.getByRole("button", { name: "More controls" }).click();
+  await settle(900);
+  recorder.equal("the zoom is restored on the way out", await zoomReadout(), deskZoom);
+  await page.getByRole("button", { name: "More controls" }).click();
+  await settle(400);
   recorder.check(
     "the library still works after a round trip",
     (await withLibrary(page, (aside) => aside.innerText())).includes("LIBRARY"),

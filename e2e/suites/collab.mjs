@@ -84,11 +84,21 @@ export async function run({ browser, baseUrl, recorder }) {
     hostConflict === guestConflict,
     `host=${hostConflict.slice(0, 70)} guest=${guestConflict.slice(0, 70)}`,
   );
-  // Which fret won is the server's business; that one of them did is not.
+  // Which fret won is the server's business; that one of them did is not. Read
+  // from the status line, which reports the model at the caret, because the
+  // rendered score also contains bar numbers — an earlier version of this asked
+  // whether the text contained a 4 or a 6 and matched the bar-4 label every
+  // time, so it would have passed even if both edits had been dropped.
+  const fretAt = async (page) => {
+    const text = await page.locator("text=/bar 1 · beat 1 · string 1/").first().innerText();
+    return text.match(/fret (\d+)/)?.[1] ?? "none";
+  };
+  const hostFret = await fretAt(host.page);
+  const guestFret = await fretAt(guest.page);
   recorder.check(
-    "the conflicting edit landed at all",
-    /[46]/.test(hostConflict),
-    hostConflict.slice(0, 70),
+    "one of the two conflicting frets won, and the same one on both",
+    hostFret === guestFret && (hostFret === "4" || hostFret === "6"),
+    `host=${hostFret} guest=${guestFret}`,
   );
 
   // A joiner replaying the server's log must land on that same document.

@@ -62,10 +62,11 @@ export async function run({ browser, baseUrl, recorder }) {
   await page.waitForTimeout(400);
   await page.getByLabel("Beats per bar").selectOption("3");
   await page.waitForTimeout(1600);
-  recorder.check(
-    "meter edited on the score reaches the engraving",
-    (await scoreText(page)).includes("3"),
-  );
+  // Deliberately not asserted against the rendered text. alphaTab draws the time
+  // signature as glyph paths, not <text>, so it never appears in scoreText — an
+  // earlier version of this checked for a "3" in the score and was matching the
+  // bar-3 label, which meant it passed whatever the meter did. The chip below
+  // reads the model back, which is the part this control is responsible for.
   recorder.check(
     "the meter chip reads back the new signature",
     ((await page.locator('[aria-label^="Time signature"]').first().getAttribute("aria-label")) ?? "").includes("3/4"),
