@@ -152,7 +152,9 @@ Every edit is an operation in a log. That single choice gives us undo, autosave,
 
 Collaboration converges on the server's ordering rather than each client's own: a client holds its edits provisional until the room tells it where they landed, so two people editing the same note at the same moment reach the same document instead of two. That rule lives in `packages/core/src/session.ts` and is tested against a model of the sync server.
 
-Quality gates in CI on every push: unit tests covering the convergence contract, the session ordering the collaboration feature rests on, and the account store's failure modes; the corpus fidelity suite; and nine browser-driven end-to-end journeys, including whether an imported file survives being edited and whether two people sharing a browser can see each other's libraries. See UI-DESIGN.md for the interface overhaul's phase status.
+Playback is verified rather than assumed. The app is built and tested in headless browsers with no audio device, so no human has heard it; alphaTab can synthesize to raw samples instead of to a speaker, and CI now measures peak, RMS, clipping, and the share of 100ms windows containing anything audible for every score. A soundfont that fails to load renders perfect notation over perfect silence, and nothing else would notice.
+
+Quality gates in CI on every push: unit tests covering the convergence contract, the session ordering the collaboration feature rests on, and the account store's failure modes; the corpus fidelity suite; the audio check; and ten browser-driven end-to-end journeys, including whether an imported file survives being edited, whether two people sharing a browser can see each other's libraries, and whether the stage view puts everything back on the way out. See UI-DESIGN.md for the interface overhaul's phase status.
 
 Billing rails, email verification, collaborative undo, offline CRDT merge, and every AI feature remain.
 

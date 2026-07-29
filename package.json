@@ -11,6 +11,7 @@
     "sync": "pnpm --filter @cubscore/sync dev",
     "test": "pnpm -r test",
     "corpus": "node tools/corpus-check.mjs",
+    "audio": "node tools/audio-check.mjs",
     "e2e": "node e2e/run.mjs"
   },
   "engines": {

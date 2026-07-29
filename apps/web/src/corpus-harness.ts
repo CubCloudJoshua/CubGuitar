@@ -48,6 +48,32 @@ export interface RoundTripResult {
   tex?: string;
 }
 
+/**
+ * What the synthesizer actually produced.
+ *
+ * Nobody has ever heard this app: it is developed and tested in headless
+ * browsers with no audio device, so every check so far has confirmed that the
+ * notation is right and simply assumed the sound was. Rendering the audio to
+ * samples is the way to check without ears — and silence, the failure that
+ * matters most, is trivially detectable.
+ */
+export interface AudioResult {
+  ok: boolean;
+  error?: string;
+  /** Milliseconds of audio synthesized. */
+  ms?: number;
+  sampleRate?: number;
+  /** Loudest absolute sample. Silence means no sound came out at all. */
+  peak?: number;
+  /** Root mean square over everything, so one click cannot pass for music. */
+  rms?: number;
+  /** Fraction of samples at or past full scale: distortion, not music. */
+  clipped?: number;
+  /** 100ms windows containing audible signal, and how many there were. */
+  audibleWindows?: number;
+  windows?: number;
+}
+
 declare global {
   interface Window {
     cubscore: {
@@ -57,6 +83,8 @@ declare global {
       roundTripTex(tex: string): Promise<RoundTripResult>;
       roundTripBytes(bytes: number[]): Promise<RoundTripResult>;
       describeTex(tex: string): Promise<unknown>;
+      renderAudioTex(tex: string, maxMs: number): Promise<AudioResult>;
+      renderAudioBytes(bytes: number[], maxMs: number): Promise<AudioResult>;
     };
   }
 }
@@ -282,8 +310,93 @@ async function roundTrip(trigger: () => void): Promise<RoundTripResult> {
   };
 }
 
+/** Fetched once: the soundfont is a few megabytes and every score needs it. */
+let soundFontBytes: Uint8Array | null = null;
+async function soundFont(): Promise<Uint8Array> {
+  if (!soundFontBytes) {
+    const response = await fetch("/soundfont/sonivox.sf3");
+    if (!response.ok) throw new Error(`soundfont fetch failed (${response.status})`);
+    soundFontBytes = new Uint8Array(await response.arrayBuffer());
+  }
+  return soundFontBytes;
+}
+
+/**
+ * Synthesizes the loaded score and measures it.
+ *
+ * The soundfont is passed explicitly rather than relied on: this harness runs
+ * with the player disabled (it costs seconds per file and import fidelity does
+ * not need it), and alphaTab documents that an exporter with no initialized
+ * synthesizer produces audio with nothing audible in it — which would make this
+ * check quietly pass on silence, the one thing it exists to catch.
+ */
+async function renderAudio(trigger: () => void, maxMs: number): Promise<AudioResult> {
+  const loaded = await run(trigger);
+  if (!loaded.ok) return { ok: false, error: loaded.error ?? "score failed to load" };
+
+  const options = new alphaTab.synth.AudioExportOptions();
+  options.soundFonts = [await soundFont()];
+  options.sampleRate = 44100;
+  options.masterVolume = 1;
+  options.metronomeVolume = 0;
+
+  const exporter = await api.exportAudio(options);
+  try {
+    const CHUNK_MS = 500;
+    const WINDOW = 4410; // 100ms at 44.1kHz
+    let peak = 0;
+    let sumSquares = 0;
+    let count = 0;
+    let clipped = 0;
+    let audibleWindows = 0;
+    let windows = 0;
+    let windowPeak = 0;
+    let windowCount = 0;
+    let ms = 0;
+
+    for (;;) {
+      const chunk = await exporter.render(CHUNK_MS);
+      if (!chunk) break;
+      ms = chunk.currentTime;
+      for (const sample of chunk.samples) {
+        const magnitude = Math.abs(sample);
+        if (magnitude > peak) peak = magnitude;
+        if (magnitude >= 1) clipped += 1;
+        sumSquares += sample * sample;
+        count += 1;
+        if (magnitude > windowPeak) windowPeak = magnitude;
+        if (++windowCount === WINDOW) {
+          windows += 1;
+          // A window counts as audible around -60 dBFS, which is quieter than
+          // any intended note and louder than dither or a denormal tail.
+          if (windowPeak > 0.001) audibleWindows += 1;
+          windowPeak = 0;
+          windowCount = 0;
+        }
+      }
+      if (ms >= maxMs) break;
+    }
+
+    return {
+      ok: count > 0,
+      ...(count > 0 ? {} : { error: "synthesizer produced no samples" }),
+      ms: Math.round(ms),
+      sampleRate: options.sampleRate,
+      peak,
+      rms: count > 0 ? Math.sqrt(sumSquares / count) : 0,
+      clipped: count > 0 ? clipped / count : 0,
+      audibleWindows,
+      windows,
+    };
+  } finally {
+    exporter.destroy();
+  }
+}
+
 window.cubscore = {
   loadTex: (tex) => run(() => api.tex(tex)),
+  renderAudioTex: (tex, maxMs) => renderAudio(() => api.tex(tex), maxMs),
+  renderAudioBytes: (bytes, maxMs) => renderAudio(() => api.load(new Uint8Array(bytes)), maxMs),
   // Bytes cross the CDP boundary as a plain array.
   loadBytes: (bytes) => run(() => api.load(new Uint8Array(bytes))),
   roundTripTex: (tex) => roundTrip(() => api.tex(tex)),

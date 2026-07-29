@@ -38,6 +38,12 @@ jobs:
       - name: Corpus and import fidelity
         run: pnpm corpus
 
+      # Synthesizes every score to raw samples and measures it. Nobody has
+      # heard this app — it is built and tested in headless browsers with no
+      # audio device — so silence is the one failure nothing else would catch.
+      - name: Audio output
+        run: pnpm audio
+
       # Drives the built app in a real browser across nine journeys, standing up
       # the API and sync services against a throwaway data directory.
       - name: End-to-end suites

@@ -56,11 +56,20 @@ pnpm dev        # start the web app (proxies /api and /ws)
 pnpm build      # typecheck and build everything
 pnpm test       # unit tests (packages/core, services/api)
 pnpm corpus     # load and render every score in fixtures/ and corpus/
-pnpm e2e        # drive the built app in a browser across nine journeys
+pnpm audio      # synthesize every score to samples and confirm it makes sound
+pnpm e2e        # drive the built app in a browser across ten journeys
 ```
 
 CI runs build, unit tests, the corpus suite (including import round-trip pitch
-fidelity), and the end-to-end suites on every push.
+fidelity), the audio check, and the end-to-end suites on every push.
+
+`pnpm audio` exists because nobody involved has heard this app. It is built and
+tested in headless browsers with no audio device, so every other gate checks the
+notation and assumes the sound. alphaTab can synthesize to raw samples instead of
+to a speaker, so this measures what actually came out: peak, RMS, clipping, and
+the share of 100ms windows containing anything audible. A soundfont that fails to
+load, a muted track, or a synth that never starts all render perfect notation
+over perfect silence, and this is the only thing that would notice.
 
 `pnpm e2e` needs `pnpm build` first. It stands up the API and sync services on
 isolated ports against a throwaway data directory, so it never touches a running
