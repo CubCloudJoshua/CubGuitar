@@ -79,7 +79,7 @@ function firstSystem(): SVGElement | null {
 }
 
 /** The first staff system of the rendered score, scaled to fit. */
-function ScoreThumbnail({ height = 104 }: { height?: number }) {
+function ScoreThumbnail({ of, height = 104 }: { of: string; height?: number }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [rendered, setRendered] = useState(false);
 
@@ -112,7 +112,11 @@ function ScoreThumbnail({ height = 104 }: { height?: number }) {
     setRendered(true);
 
     return () => host.replaceChildren();
-  }, [height]);
+    // `of` is the link this thumbnail belongs to. Without it the capture happens
+    // once per mount, so sharing a second score while the card is still open
+    // would show the first score's music beside the second score's link — the
+    // one thing the miniature exists to get right.
+  }, [height, of]);
 
   return (
     <div
@@ -164,7 +168,7 @@ export function ShareCard({ url, onDismiss }: { url: string; onDismiss: () => vo
         animation: "cub-share-in 220ms cubic-bezier(0.2, 0.9, 0.3, 1.2)",
       }}
     >
-      <ScoreThumbnail />
+      <ScoreThumbnail of={url} />
       <div style={{ display: "flex", alignItems: "center", gap: 8, flex: "2 1 320px", minWidth: 0 }}>
         <Label style={{ color: color.accent }}>{copied === true ? "COPIED" : "LINK"}</Label>
         <TextField

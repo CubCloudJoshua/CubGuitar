@@ -239,6 +239,15 @@ export function Drawer({
         role="dialog"
         aria-label={label}
         aria-hidden={!open}
+        // A closed drawer is translated off screen, which hides it from sight and
+        // from nothing else: every control inside kept its place in the tab
+        // order, so tabbing from the header walked invisibly through the search
+        // field and every score's Delete button — a keyboard user could delete a
+        // score they could not see. aria-hidden silenced the announcements and
+        // made that worse rather than better. `inert` is the attribute that
+        // actually removes it: no focus, no clicks, no announcements.
+        // React 18 does not know the prop, so it is spread as an attribute.
+        {...(open ? {} : ({ inert: "" } as Record<string, string>))}
         style={{
           position: "fixed",
           top: 0,

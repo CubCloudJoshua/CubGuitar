@@ -63,4 +63,38 @@ export async function run({ browser, baseUrl, recorder }) {
   await page.keyboard.press("Enter");
   await page.waitForTimeout(1500);
   recorder.check("playback starts from the palette", (await page.getByRole("button", { name: "PAUSE" }).count()) === 1);
+  await page.getByRole("button", { name: "PAUSE" }).click();
+  await page.waitForTimeout(500);
+
+  // A closed drawer must be out of the keyboard's way. It is translated off
+  // screen, which hides it from sight and from nothing else: every control
+  // inside kept its place in the tab order, so tabbing from the header walked
+  // invisibly through the search field and every score's Delete button, and a
+  // keyboard user could delete a score they could not see.
+  const reachable = async () =>
+    page.evaluate(() => {
+      const drawer = document.querySelector('[role="dialog"]');
+      if (!drawer) return null;
+      const focusable = drawer.querySelectorAll("button, input, select, a[href], [tabindex]");
+      let reached = 0;
+      for (const el of focusable) {
+        el.focus?.();
+        if (document.activeElement === el) reached += 1;
+      }
+      document.activeElement?.blur?.();
+      return { total: focusable.length, reached };
+    });
+
+  const closed = await reachable();
+  recorder.check("the drawer has controls to reach", (closed?.total ?? 0) > 0, JSON.stringify(closed));
+  recorder.equal("none of a closed drawer's controls can take focus", closed?.reached, 0);
+
+  await page.getByRole("button", { name: "LIBRARY", exact: true }).click();
+  await page.waitForTimeout(700);
+  const opened = await reachable();
+  recorder.check(
+    "an open drawer's controls can take focus again",
+    (opened?.reached ?? 0) > 0,
+    JSON.stringify(opened),
+  );
 }

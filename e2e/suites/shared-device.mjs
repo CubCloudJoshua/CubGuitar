@@ -83,6 +83,37 @@ export async function run({ browser, baseUrl, recorder }) {
   const syncText = (await page.locator("text=/synced: /").textContent()) ?? "";
   recorder.check("Bob's sync pushes nothing of Alice's", /synced: 0 pushed/.test(syncText), syncText);
 
+  // A tab that was open before the account changed must not sync. The library's
+  // owner is per-tab module state while the session cookie is per-profile, so an
+  // older tab believes it belongs to whoever was signed in when it loaded while
+  // its requests carry the current account's session — and a sync from it pushed
+  // one person's scores into the other's cloud library.
+  const stale = await page.context().newPage();
+  recorder.watch?.(stale, "stale-tab");
+  await stale.goto(baseUrl, { waitUntil: "networkidle" });
+  await appReady(stale);
+  // The tab loaded as Bob. Alice signs in in the original tab, which leaves the
+  // stale tab holding Bob's owner and Alice's cookie.
+  await openAccountPanel(page);
+  await page.getByRole("button", { name: "SIGN OUT" }).click();
+  await settle(1400);
+  await submitAccount(page, alice, password, "login");
+
+  await openAccountPanel(stale);
+  await stale.getByRole("button", { name: "SYNC LIBRARY" }).click();
+  await stale.waitForTimeout(4000);
+  const staleResult = await stale.locator("aside, body").first().innerText();
+  recorder.check(
+    "a stale tab refuses to sync across an account change",
+    /different account is signed in/.test(staleResult),
+    (staleResult.match(/synced:[^\n]*|different account[^\n]*/) ?? ["no message"])[0],
+  );
+  await stale.close();
+  await settle(800);
+
+  // Alice's library is untouched by that attempt.
+  recorder.equal("the refused sync changed nothing locally", await count(page), aliceCount);
+
   // Alice comes back to the same machine and finds her work.
   await openAccountPanel(page);
   await page.getByRole("button", { name: "SIGN OUT" }).click();

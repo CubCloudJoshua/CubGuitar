@@ -65,12 +65,36 @@ async function pushEntry(entry: LibraryEntry): Promise<void> {
   if (!response.ok) throw new Error(`push failed for "${entry.title}" (${response.status})`);
 }
 
+/**
+ * Who the server thinks we are, right now.
+ *
+ * Not who this tab thinks we are. The library's owner is module state, so it is
+ * per-tab, while the session cookie is per-profile: sign out here and sign in as
+ * someone else in another tab, and this tab still believes it belongs to the
+ * first account while its requests carry the second account's session. A sync
+ * from that tab pushed one person's scores into the other's cloud library and
+ * pulled the other's back down under the first one's name. The server is the
+ * only party that knows the truth, so ask it.
+ */
+async function serverIdentity(): Promise<string | null> {
+  const response = await fetch("/api/auth/me");
+  if (!response.ok) return null;
+  return ((await response.json()) as { user?: { id?: string } }).user?.id ?? null;
+}
+
 export async function syncNow(): Promise<SyncResult> {
   const ownerId = libraryOwner();
   // listEntries already returns only this account's entries, so a shared
   // browser cannot push the previous user's scores into this user's cloud.
   // Refusing outright while signed out is clearer than pushing to a 401.
   if (!ownerId) throw new Error("sign in to sync");
+
+  const serverOwner = await serverIdentity();
+  if (serverOwner === null) throw new Error("your session has ended — reload and sign in again");
+  if (serverOwner !== ownerId) {
+    throw new Error("a different account is signed in — reload this tab before syncing");
+  }
+
   const local = await listEntries();
   const localIds = new Set(local.map((e) => e.id));
 
@@ -88,7 +112,8 @@ export async function syncNow(): Promise<SyncResult> {
     const full = (await response.json()) as CloudFull;
     await putEntry({
       id: full.id,
-      ownerId,
+      // The verified id, not this tab's belief about it.
+      ownerId: serverOwner,
       rev: 0,
       title: full.title,
       artist: full.artist,
