@@ -8,10 +8,24 @@ import type { Score as CoreScore } from "@cubscore/core";
 import { fromAlphaTab, type ImportReport } from "@cubscore/formats";
 import type { AlphaTabController } from "../useAlphaTab";
 import type { EditorController } from "../editor/useEditor";
-import { deleteEntry, listEntries, newId, putEntry, type LibraryEntry } from "./db";
+import { deleteEntry, getEntry, listEntries, newId, putEntry, type LibraryEntry } from "./db";
 import { DEMO_SCORE } from "../demo";
 
 type Mode = "play" | "edit";
+
+/**
+ * Sentinel for savedTexRef: a document was just loaded, so the next tex the
+ * editor produces *is* the saved state. Comparing against the tex directly is
+ * impossible at load time because the editor recomputes it on the next render.
+ */
+const AWAIT_BASELINE = "\u0000cubscore-awaiting-baseline";
+
+/** Which library row the editor writes to, and the revision it loaded. */
+interface EditorTarget {
+  id: string;
+  addedAt: number;
+  rev: number;
+}
 
 /** A load in flight, saved to the library once alphaTab reports the score. */
 interface PendingImport {
@@ -33,11 +47,27 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [importNotice, setImportNotice] = useState<ImportReport | null>(null);
   /**
-   * Library row the editor autosaves into. State rather than a ref so the
-   * autosave effect re-runs the moment ownership changes and the UI can offer
-   * a guest a way to adopt the document.
+   * Library row the editor autosaves into, with the revision we loaded. Held in
+   * state so the autosave effect and the UI react to ownership changes, and
+   * mirrored into a ref so a flush triggered while leaving the editor reads the
+   * current target rather than a stale closure.
    */
-  const [editorEntry, setEditorEntry] = useState<{ id: string; addedAt: number } | null>(null);
+  const [editorEntry, setEditorEntry] = useState<EditorTarget | null>(null);
+  const editorEntryRef = useRef<EditorTarget | null>(null);
+  const setEditorTarget = useCallback((target: EditorTarget | null) => {
+    editorEntryRef.current = target;
+    setEditorEntry(target);
+  }, []);
+
+  /**
+   * The document as of the last save or load. Autosave compares against this
+   * so merely opening the editor never rewrites a row: entering edit mode on
+   * an imported score used to overwrite it with the lossy projection.
+   */
+  const savedTexRef = useRef<string | null>(null);
+  /** Latest document, for flushes that must not wait for a re-render. */
+  const latestRef = useRef({ score: editor.score, tex: editor.tex });
+  latestRef.current = { score: editor.score, tex: editor.tex };
 
   const refresh = useCallback(async () => {
     setEntries(await listEntries());
@@ -91,6 +121,7 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       }
       await putEntry({
         id: pending.id,
+        rev: 0,
         title: c.score?.title ?? "Untitled",
         artist: c.score?.artist ?? "",
         format: pending.format,
@@ -125,46 +156,136 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     if (api) api.tickPosition = cursorTick;
   }, [mode, cursorTick, c.ready, c.getApi, editorTex]);
 
-  // Autosave, so editor work survives a reload like everything else.
+  /**
+   * Writes the editor document to its library row.
+   *
+   * Three rules earn their keep here:
+   *  - Merge, never replace. format/bytes/report/fileName describe the imported
+   *    source and the editor does not own them; overwriting them with the lossy
+   *    alphaTex projection destroyed the only copy of the user's file.
+   *  - Never resurrect. A row deleted in another tab stays deleted.
+   *  - Fork on conflict. If another writer advanced the row, two divergent
+   *    editor states cannot be merged yet, so this saves alongside their work
+   *    instead of clobbering it.
+   */
+  const flushSave = useCallback(async () => {
+    const target = editorEntryRef.current;
+    if (!target) return;
+    // Read synchronously: callers flush and then immediately change state.
+    const { score, tex } = latestRef.current;
+    if (tex === savedTexRef.current || savedTexRef.current === AWAIT_BASELINE) return;
+
+    const existing = await getEntry(target.id);
+    if (!existing && target.rev > 0) return;
+
+    const conflicted = existing !== undefined && (existing.rev ?? 0) !== target.rev;
+    const source = conflicted ? undefined : existing;
+    const id = conflicted ? newId() : target.id;
+    const addedAt = conflicted ? Date.now() : target.addedAt;
+
+    const entry: LibraryEntry = {
+      id,
+      rev: (source?.rev ?? 0) + 1,
+      title: score.title,
+      artist: score.artist,
+      format: source?.format ?? "altex",
+      bytes: source?.bytes ?? null,
+      // openEntry prefers tex over bytes, so a byte-backed import keeps its own
+      // tex (usually null) and the edits travel in core instead.
+      tex: source?.bytes ? source.tex : tex,
+      core: JSON.stringify(score),
+      report: source?.report ?? null,
+      authored: true,
+      fileName: source?.fileName ?? null,
+      addedAt,
+      openedAt: Date.now(),
+      tracks: score.tracks.length,
+      bars: score.tracks[0]?.bars.length ?? 0,
+    };
+    await putEntry(entry);
+    // The awaits above yield. Callers that flush on the way out (new score,
+    // open, import, leave) point the editor at a different row in the same
+    // tick, so adopting this write as "the editor's saved state" would send
+    // the *next* document into the row we just left.
+    if (editorEntryRef.current === target) {
+      savedTexRef.current = tex;
+      setEditorTarget({ id, addedAt, rev: entry.rev });
+      if (conflicted) setCurrentId(id);
+    }
+    await refresh();
+  }, [refresh, setEditorTarget]);
+
+  // Debounced autosave. The dirty comparison means entering the editor cannot
+  // rewrite a row on its own, and the timer only coalesces keystrokes: exits
+  // flush explicitly, because a cleared timer used to discard the work.
   const editorScore = editor.score;
   useEffect(() => {
-    if (mode !== "edit") return;
-    const target = editorEntry;
-    if (!target) return;
-    const timer = setTimeout(() => {
-      void (async () => {
-        await putEntry({
-          id: target.id,
-          title: editorScore.title,
-          artist: editorScore.artist,
-          format: "altex",
-          bytes: null,
-          tex: editorTex,
-          core: JSON.stringify(editorScore),
-          report: null,
-          authored: true,
-          fileName: null,
-          addedAt: target.addedAt,
-          openedAt: Date.now(),
-          tracks: editorScore.tracks.length,
-          bars: editorScore.tracks[0]?.bars.length ?? 0,
-        });
-        await refresh();
-      })();
-    }, 1000);
+    if (mode !== "edit" || !editorEntry) return;
+    if (savedTexRef.current === AWAIT_BASELINE) {
+      // First render after a load: adopt this as the saved state and write
+      // nothing. Without this, opening an import overwrote it immediately.
+      savedTexRef.current = editorTex;
+      return;
+    }
+    if (editorTex === savedTexRef.current) return;
+    const timer = setTimeout(() => void flushSave(), 1000);
     return () => clearTimeout(timer);
-  }, [mode, editorEntry, editorScore, editorTex, refresh]);
+  }, [mode, editorEntry, editorScore, editorTex, flushSave]);
+
+  // Closing or hiding the tab must not silently drop the last edit.
+  useEffect(() => {
+    const onHide = () => void flushSave();
+    window.addEventListener("pagehide", onHide);
+    return () => window.removeEventListener("pagehide", onHide);
+  }, [flushSave]);
+
+  /** Leaves the editor, flushing first so nothing pending is lost. */
+  const leaveEditor = useCallback(() => {
+    void flushSave();
+    setMode("play");
+  }, [flushSave]);
 
   /** Converts the open imported score into an editable document. */
-  const editImported = useCallback(() => {
-    const entry = entries.find((e) => e.id === currentId);
-    if (!entry?.core) return;
+  const editImported = useCallback(async () => {
+    const listed = entries.find((e) => e.id === currentId);
+    if (!listed?.core) return;
+    // Flush first, then re-read: this row may be the one the editor was just
+    // writing to, and the listing in state is a snapshot from before that.
+    await flushSave();
+    const entry = (await getEntry(listed.id)) ?? listed;
+    if (!entry.core) return;
     editor.loadScore(JSON.parse(entry.core) as CoreScore);
-    setEditorEntry({ id: entry.id, addedAt: entry.addedAt });
+    // Loading is not an edit: the row already holds this document.
+    savedTexRef.current = AWAIT_BASELINE;
+    setEditorTarget({ id: entry.id, addedAt: entry.addedAt, rev: entry.rev ?? 0 });
     setImportNotice(entry.report ? (JSON.parse(entry.report) as ImportReport) : null);
     setMode("edit");
     void putEntry({ ...entry, authored: true, openedAt: Date.now() }).then(refresh);
-  }, [entries, currentId, editor, refresh]);
+  }, [entries, currentId, editor, flushSave, refresh, setEditorTarget]);
+
+  /**
+   * Goes back to the bytes the user imported.
+   *
+   * Autosave never touches format/bytes/report/fileName, so an edited import
+   * still holds the original file. This is the way back to it, and the reason
+   * keeping those fields is worth anything: an import row carries both the
+   * original and the working edit, and this chooses which one opening shows.
+   * The edit is kept, not discarded — EDIT resumes it.
+   */
+  const showImportedOriginal = useCallback(async () => {
+    const id = editorEntryRef.current?.id ?? currentId;
+    if (!id) return;
+    const entry = await getEntry(id);
+    if (!entry?.bytes) return;
+    // Stop the autosave from writing the projection we are stepping away from.
+    savedTexRef.current = AWAIT_BASELINE;
+    setEditorTarget(null);
+    setMode("play");
+    await putEntry({ ...entry, rev: (entry.rev ?? 0) + 1, authored: false, openedAt: Date.now() });
+    setCurrentId(entry.id);
+    loadBytes(entry.bytes);
+    await refresh();
+  }, [currentId, loadBytes, refresh, setEditorTarget]);
 
   /**
    * Adopts whatever the editor currently holds into this device's library and
@@ -173,24 +294,29 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
    * vanish when the tab closes.
    */
   const adoptEditorScore = useCallback(() => {
-    const target = { id: newId(), addedAt: Date.now() };
-    setEditorEntry(target);
+    const target = { id: newId(), addedAt: Date.now(), rev: 0 };
+    // A brand-new row: everything in the editor is unsaved, so mark it dirty.
+    savedTexRef.current = null;
+    setEditorTarget(target);
     setCurrentId(target.id);
     setMode("edit");
-  }, []);
+  }, [setEditorTarget]);
 
   const startNewScore = useCallback(() => {
+    void flushSave();
     editor.newScore();
     setImportNotice(null);
-    const target = { id: newId(), addedAt: Date.now() };
-    setEditorEntry(target);
+    const target = { id: newId(), addedAt: Date.now(), rev: 0 };
+    savedTexRef.current = null;
+    setEditorTarget(target);
     setCurrentId(target.id);
     setMode("edit");
     setLibraryOpen(false);
-  }, [editor]);
+  }, [editor, flushSave, setEditorTarget]);
 
   const importFile = useCallback(
     async (file: File) => {
+      void flushSave();
       setMode("play");
       const isTex = /\.(altex|tex)$/i.test(file.name);
       if (isTex) {
@@ -204,17 +330,22 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       }
       setLibraryOpen(false);
     },
-    [loadTex, loadBytes],
+    [flushSave, loadTex, loadBytes],
   );
 
   const openEntry = useCallback(
-    async (entry: LibraryEntry) => {
+    async (row: LibraryEntry) => {
+      // Awaited, and then re-read: reopening the row that is currently being
+      // edited would otherwise load the pre-flush copy and write it back.
+      await flushSave();
+      const entry = (await getEntry(row.id)) ?? row;
       setCurrentId(entry.id);
       setImportNotice(null);
       if (entry.authored && entry.core) {
         // Authored here, so it reopens in the editor.
         editor.loadScore(JSON.parse(entry.core) as CoreScore);
-        setEditorEntry({ id: entry.id, addedAt: entry.addedAt });
+        savedTexRef.current = AWAIT_BASELINE;
+        setEditorTarget({ id: entry.id, addedAt: entry.addedAt, rev: entry.rev ?? 0 });
         setMode("edit");
       } else {
         // Imported files open in the player, where alphaTab renders the
@@ -227,7 +358,7 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       await refresh();
       setLibraryOpen(false);
     },
-    [editor, loadTex, loadBytes, refresh],
+    [editor, flushSave, loadTex, loadBytes, refresh, setEditorTarget],
   );
 
   const removeEntry = useCallback(
@@ -235,7 +366,7 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       await deleteEntry(id);
       if (id === currentId) setCurrentId(null);
       if (editorEntry?.id === id) {
-        setEditorEntry(null);
+        setEditorTarget(null);
         setMode("play");
       }
       await refresh();
@@ -253,6 +384,9 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     importNotice,
     setImportNotice,
     refresh,
+    leaveEditor,
+    flushSave,
+    showImportedOriginal,
     adoptEditorScore,
     ownsEditorEntry: editorEntry !== null,
     editImported,

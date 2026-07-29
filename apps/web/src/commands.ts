@@ -45,6 +45,17 @@ export function useCommands(deps: CommandDeps): Command[] {
       add({ id: "open", title: "Open file…", section: "Score", run: deps.openFilePicker });
       add({ id: "library", title: "Toggle library", section: "Score", hint: "Cmd+L", run: () => lib.setLibraryOpen((v) => !v) });
       if (canShare) add({ id: "share", title: "Share current score", section: "Score", run: deps.shareCurrent });
+      // Only for an import that has been taken into the editor: its original
+      // file is still stored, and this is the way back to it.
+      const current = lib.entries.find((e) => e.id === lib.currentId);
+      if (current?.bytes && current.authored) {
+        add({
+          id: "show-original",
+          title: "Show imported original",
+          section: "Score",
+          run: () => void lib.showImportedOriginal(),
+        });
+      }
       add({ id: "account", title: "Account and sync", section: "Score", run: deps.toggleAccount });
     }
 
@@ -56,7 +67,7 @@ export function useCommands(deps: CommandDeps): Command[] {
     }
 
     if (editing) {
-      add({ id: "player-mode", title: "Back to player", section: "Edit", run: () => lib.setMode("play") });
+      add({ id: "player-mode", title: "Back to player", section: "Edit", run: lib.leaveEditor });
       add({ id: "add-guitar", title: "Add guitar track", section: "Edit", run: () => editor.addTrack("guitar") });
       add({ id: "add-bass", title: "Add bass track", section: "Edit", run: () => editor.addTrack("bass") });
       if (editor.score.tracks.length > 1) {

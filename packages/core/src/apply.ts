@@ -191,12 +191,29 @@ export function applyOp(score: Score, op: Op): Score {
           ? { ...n, articulations: n.articulations.filter((a) => a !== op.articulation) }
           : n,
       );
+
+    default: {
+      // Ops arrive over the network from other clients, so an op type this
+      // build does not know (a newer collaborator, or a malformed message)
+      // must be ignored rather than falling through to undefined — which
+      // applyBatch would spread into a document containing nothing but a
+      // revision number. The never assignment keeps the switch exhaustive at
+      // compile time so a genuinely new op type still fails the build.
+      const unknown: never = op;
+      void unknown;
+      return score;
+    }
   }
 }
 
 /** Applies a batch as one unit and advances the revision once. */
 export function applyBatch(score: Score, batch: OpBatch): Score {
   let next = score;
-  for (const op of batch.ops) next = applyOp(next, op);
+  for (const op of batch.ops) {
+    const applied = applyOp(next, op);
+    // Belt and braces alongside applyOp's default case: a malformed batch can
+    // never replace a document with a partial object.
+    next = applied ?? next;
+  }
   return next === score ? score : { ...next, revision: score.revision + 1 };
 }

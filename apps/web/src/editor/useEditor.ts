@@ -106,15 +106,20 @@ export function useEditor() {
   }, []);
 
   /**
-   * Applies a batch from a collaborator. Deliberately not an undo step: your
-   * Ctrl+Z must never revert someone else's edit. Local undo snapshots from
-   * before the remote batch still apply cleanly because ops addressing ids
-   * the snapshot lacks are no-ops.
+   * Applies a batch from a collaborator, and drops local history when it lands.
+   *
+   * A snapshot taken before someone else's edit no longer describes any
+   * document the group shares, so restoring it would erase their work. History
+   * gated only on "is the socket live" was worse than useless: the moment a
+   * session ended or the connection dropped, one Ctrl+Z reinstated a pre-collab
+   * snapshot and autosaved it over everything the session produced. Undo
+   * resumes from edits made after the remote batch.
    */
   const applyRemote = useCallback((batch: OpBatch) => {
     setState((prev) => {
       const nextScore = applyBatch(prev.score, batch);
-      return nextScore === prev.score ? prev : { ...prev, score: nextScore };
+      if (nextScore === prev.score) return prev;
+      return { score: nextScore, past: [], future: [] };
     });
   }, []);
 

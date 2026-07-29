@@ -168,7 +168,7 @@ export function App() {
           <Button variant="outline" onClick={lib.editImported}>EDIT</Button>
         )}
         {editing && (
-          <Button variant="outline" onClick={() => lib.setMode("play")}>PLAYER</Button>
+          <Button variant="outline" onClick={lib.leaveEditor}>PLAYER</Button>
         )}
         {editing && collab.status === "off" && (
           <Button variant="outline" onClick={collab.start}>COLLAB</Button>

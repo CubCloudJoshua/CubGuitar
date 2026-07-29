@@ -32,6 +32,7 @@ export function useSharedView(c: AlphaTabController) {
     if (!payload || !c.score) return;
     await putEntry({
       id: newId(),
+      rev: 0,
       title: c.score.title,
       artist: c.score.artist,
       format: payload.format,

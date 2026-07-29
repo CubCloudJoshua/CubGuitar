@@ -15,6 +15,11 @@ export type ScoreFormat = "gp" | "altex";
 
 export interface LibraryEntry {
   id: string;
+  /**
+   * Bumped on every save. A writer that loaded rev N and finds rev != N knows
+   * another tab moved the row on, and forks rather than clobbering it.
+   */
+  rev: number;
   title: string;
   artist: string;
   format: ScoreFormat;

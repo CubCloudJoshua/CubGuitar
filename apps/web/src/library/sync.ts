@@ -83,6 +83,7 @@ export async function syncNow(): Promise<SyncResult> {
     const full = (await response.json()) as CloudFull;
     await putEntry({
       id: full.id,
+      rev: 0,
       title: full.title,
       artist: full.artist,
       format: full.format,
