@@ -95,11 +95,10 @@ export function useCommands(deps: CommandDeps): Command[] {
         add({ id: "remove-track", title: "Remove active track", section: "Edit", run: editor.removeTrack });
       }
       add({ id: "add-bar", title: "Add bar", section: "Edit", hint: "Enter", run: editor.addBar });
-      const allowHistory = collab.status !== "live";
-      if (allowHistory) {
-        add({ id: "undo", title: "Undo", section: "Edit", hint: "Cmd+Z", run: editor.undo });
-        add({ id: "redo", title: "Redo", section: "Edit", hint: "Cmd+Shift+Z", run: editor.redo });
-      }
+      // Offered during a live session too: undo sends the inverse of this
+      // client's own edit through the server, so it converges like any batch.
+      add({ id: "undo", title: "Undo", section: "Edit", hint: "Cmd+Z", run: editor.undo });
+      add({ id: "redo", title: "Redo", section: "Edit", hint: "Cmd+Shift+Z", run: editor.redo });
       for (const [label, d] of [["whole", 1], ["half", 2], ["quarter", 4], ["eighth", 8], ["sixteenth", 16]] as const) {
         add({ id: `dur-${d}`, title: `Set duration to ${label}`, section: "Edit", run: () => editor.setDuration(d) });
       }

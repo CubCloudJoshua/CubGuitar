@@ -131,4 +131,78 @@ export async function run({ browser, baseUrl, recorder }) {
     reopened.includes("6") && reopened.includes("4"),
     reopened.slice(0, 120),
   );
+
+  // Undo is inverse ops rather than document snapshots, which is what lets it
+  // work during a live session. The price is that every op has to know how to
+  // reverse itself, so a whole run of gestures is walked back to the start and
+  // forward again: an inverse that restores a fret but drops the articulation,
+  // or puts a chord's notes back in a different order, shows up here as a
+  // document that does not match. A snapshot could not fail this test, which is
+  // exactly why it is worth having now.
+  //
+  // Run last, on a score of its own, because it leaves the caret and the undo
+  // stack somewhere the checks above do not expect.
+  await page.getByRole("button", { name: "NEW", exact: true }).click();
+  await settle(1600);
+  const deep = await scoreText(page);
+  // Four frets (two of them stacked into a chord on one beat), a dot, a new bar,
+  // and a palm mute: four kinds of op with four different inverses. The moves in
+  // between are cursor-only and leave no history, which is why the undo count
+  // below is the number of editing gestures rather than the list length.
+  const gestures = [
+    ["Digit3", true],
+    ["ArrowDown", false],
+    ["Digit9", true],
+    ["Period", true],
+    ["ArrowRight", false],
+    ["Digit7", true],
+    ["ArrowUp", false],
+    ["Digit5", true],
+    ["Enter", true],
+  ];
+  for (const [key] of gestures) {
+    await page.keyboard.press(key);
+    await page.waitForTimeout(260);
+  }
+  await page.getByRole("button", { name: "P.M.", exact: true }).click();
+  await settle(1000);
+  const edited = await scoreText(page);
+  const steps = gestures.filter(([, edits]) => edits).length + 1;
+  recorder.check("the run of edits changes the score", edited !== deep);
+
+  for (let i = 0; i < steps; i += 1) {
+    await page.keyboard.press("Control+z");
+    await page.waitForTimeout(240);
+  }
+  await settle(1400);
+  recorder.check(
+    "undoing every step returns the exact document it started from",
+    (await scoreText(page)) === deep,
+    `want ${deep.slice(0, 90)} | got ${(await scoreText(page)).slice(0, 90)}`,
+  );
+  recorder.check(
+    "UNDO is disabled once the stack is exhausted",
+    await page.getByRole("button", { name: "UNDO", exact: true }).isDisabled(),
+  );
+
+  for (let i = 0; i < steps; i += 1) {
+    await page.keyboard.press("Control+Shift+z");
+    await page.waitForTimeout(240);
+  }
+  await settle(1400);
+  recorder.check(
+    "redoing every step returns the edited document again",
+    (await scoreText(page)) === edited,
+    `want ${edited.slice(0, 90)} | got ${(await scoreText(page)).slice(0, 90)}`,
+  );
+  recorder.check(
+    "REDO is disabled once the stack is exhausted",
+    await page.getByRole("button", { name: "REDO", exact: true }).isDisabled(),
+  );
+
+  // Extra presses past the end must not move the document — an off-by-one that
+  // consumed a step without applying one would show up as drift here.
+  for (let i = 0; i < 3; i += 1) await page.keyboard.press("Control+Shift+z");
+  await settle(900);
+  recorder.check("redo past the end does nothing", (await scoreText(page)) === edited);
 }

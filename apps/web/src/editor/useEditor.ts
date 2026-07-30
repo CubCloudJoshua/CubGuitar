@@ -10,6 +10,7 @@ import {
   createTrack,
   duration,
   frettedGuitar,
+  invertBatch,
   localCommit,
   nextId,
   pitchAt,
@@ -39,16 +40,34 @@ export interface Cursor {
 const AUTHOR = "local";
 /** Window for typing a two-digit fret, matching Guitar Pro's behaviour. */
 const DIGIT_WINDOW_MS = 900;
+/**
+ * How far back undo reaches. Inverse ops are a few hundred bytes each, unlike
+ * the whole-document snapshots this replaced — an unbounded stack of those on an
+ * imported 274-bar score was megabytes per keystroke.
+ */
+const HISTORY_LIMIT = 200;
 
 function op(kind: OpKind): Op {
   return { id: nextId("o"), author: AUTHOR, at: 0, ...kind };
 }
 
-/** Score plus undo stacks, updated atomically so they can never disagree. */
+/**
+ * One undo step: what the gesture did, and what takes it back.
+ *
+ * Both directions are ops, so undo and redo travel the same road as a keystroke
+ * — through the log, through the server in a live session, applied by every
+ * client. See @cubscore/core/invert for why undo cannot be snapshots.
+ */
+interface HistoryEntry {
+  ops: Op[];
+  inverse: Op[];
+  label: string;
+}
+
 interface EditorState {
   score: Score;
-  past: Score[];
-  future: Score[];
+  past: HistoryEntry[];
+  future: HistoryEntry[];
   /**
    * Non-null while a live session owns ordering, in which case `score` is a
    * projection of it rather than the document itself. The rule and its
@@ -56,6 +75,21 @@ interface EditorState {
    * model of the sync server.
    */
   live: Session | null;
+}
+
+/**
+ * Folds a batch into the document, live or local, leaving history alone.
+ *
+ * Returns the same state when nothing moved, so callers can tell an edit from a
+ * gesture that asked for what was already there.
+ */
+function fold(prev: EditorState, batch: OpBatch): EditorState {
+  if (prev.live) {
+    const live = localCommit(prev.live, batch);
+    return { ...prev, score: sessionView(live), live };
+  }
+  const score = applyBatch(prev.score, batch);
+  return score === prev.score ? prev : { ...prev, score };
 }
 
 export function useEditor() {
@@ -66,8 +100,30 @@ export function useEditor() {
     live: null,
   }));
   const { score, past, future } = state;
+  /**
+   * The state as of the last call, not the last render.
+   *
+   * Every mutator below reads this, computes the whole next state, and
+   * publishes it, rather than passing an updater to setState. Two reasons.
+   *
+   * Undo has to know which entry it is undoing at the moment the key is
+   * pressed, because it sends that entry's inverse to the sync server — which
+   * happens outside React's updater. Deciding inside one instead would make two
+   * Ctrl+Z presses in a single tick both read the same top-of-stack and undo
+   * the same edit twice, sending one edit's inverse to the room twice.
+   *
+   * And a remote batch arriving from the socket in the same tick as a keystroke
+   * has to see that keystroke. Updaters would order correctly among themselves,
+   * but the ops sent to the server are built outside them, from values that
+   * would already be a tick stale.
+   */
+  const stateRef = useRef(state);
+  const publish = useCallback((next: EditorState) => {
+    stateRef.current = next;
+    setState(next);
+  }, []);
   const [cursor, setCursor] = useState<Cursor>({ track: 0, bar: 0, beat: 0, string: 1 });
-  /** The op log. Undo uses snapshots today; the log is what sync will replay. */
+  /** The op log, undo and redo batches included. What sync replays. */
   const logRef = useRef<OpBatch[]>([]);
   const digitRef = useRef<{ value: number; at: number } | null>(null);
   /** Collab tap: every locally committed batch is handed to this listener. */
@@ -78,83 +134,109 @@ export function useEditor() {
   const voice = bar?.voices[0];
   const beat: Beat | undefined = voice?.beats[cursor.beat];
 
-  const commit = useCallback((ops: Op[], label: string) => {
-    if (ops.length === 0) return;
-    const batch: OpBatch = { id: nextId("k"), ops, label };
-    // Handlers run once per user action (unlike updaters), so this cannot
-    // double-send under StrictMode. An ineffective batch no-ops remotely too.
-    commitListenerRef.current?.(batch);
-    setState((prev) => {
-      // React StrictMode invokes updaters twice in development; the id check
-      // keeps the log from recording the batch twice.
-      const record = () => {
-        if (logRef.current.at(-1)?.id !== batch.id) logRef.current.push(batch);
-      };
-      if (prev.live) {
-        const live = localCommit(prev.live, batch);
-        record();
-        // No undo history in a live session: a snapshot of a document the
-        // group has moved past is not something anyone can safely go back to.
-        return { score: sessionView(live), past: [], future: [], live };
-      }
-      const nextScore = applyBatch(prev.score, batch);
-      if (nextScore === prev.score) return prev;
-      record();
-      return { ...prev, score: nextScore, past: [...prev.past, prev.score], future: [] };
-    });
-  }, []);
+  const commit = useCallback(
+    (ops: Op[], label: string) => {
+      if (ops.length === 0) return;
+      const prev = stateRef.current;
+      const batch: OpBatch = { id: nextId("k"), ops, label };
+      // The inverse is computed here and kept, because the old values it has to
+      // restore exist only in the document about to be replaced.
+      const inverse = invertBatch(prev.score, batch).map(op);
+      // Sent even when it changes nothing locally: in a live session the server
+      // matches the acknowledgement by batch id, so a batch this client
+      // recorded as pending has to be one the server will echo. It no-ops on
+      // the far side just as it did here.
+      commitListenerRef.current?.(batch);
+      const folded = fold(prev, batch);
+      if (folded === prev) return;
+      logRef.current.push(batch);
+      // A gesture with no inverse changed nothing worth going back to, so it
+      // leaves the stacks alone rather than adding a step that does nothing.
+      publish(
+        inverse.length === 0
+          ? folded
+          : {
+              ...folded,
+              past: [...prev.past, { ops, inverse, label }].slice(-HISTORY_LIMIT),
+              future: [],
+            },
+      );
+    },
+    [publish],
+  );
 
-  // Both stacks stay empty in a live session, so these are no-ops there rather
-  // than a way to move the document out from under the server's ordering.
+  /**
+   * Takes back this client's last edit, wherever it now sits in the log.
+   *
+   * The inverse goes out as an ordinary batch, so in a live session everyone
+   * applies it in the server's order and the room stays converged. It undoes
+   * only the edit it was built from: a collaborator's work that arrived in
+   * between survives, which is the whole reason this is inverse ops rather than
+   * the document snapshots it replaced.
+   *
+   * If a collaborator has since deleted what the inverse addresses, its ops find
+   * no target and it changes nothing — the step is still consumed, because there
+   * is nothing left to take back.
+   */
   const undo = useCallback(() => {
-    setState((prev) => {
-      const previous = prev.past[prev.past.length - 1];
-      if (!previous) return prev;
-      return {
-        ...prev,
-        score: previous,
-        past: prev.past.slice(0, -1),
-        future: [prev.score, ...prev.future],
-      };
+    const prev = stateRef.current;
+    const entry = prev.past[prev.past.length - 1];
+    if (!entry) return;
+    const batch: OpBatch = { id: nextId("k"), ops: entry.inverse, label: `Undo ${entry.label}` };
+    commitListenerRef.current?.(batch);
+    logRef.current.push(batch);
+    publish({
+      ...fold(prev, batch),
+      past: prev.past.slice(0, -1),
+      future: [entry, ...prev.future],
     });
-  }, []);
+  }, [publish]);
 
   const redo = useCallback(() => {
-    setState((prev) => {
-      const next = prev.future[0];
-      if (!next) return prev;
-      return {
-        ...prev,
-        score: next,
-        past: [...prev.past, prev.score],
-        future: prev.future.slice(1),
-      };
+    const prev = stateRef.current;
+    const entry = prev.future[0];
+    if (!entry) return;
+    // The original ops again under a fresh batch id. The ids *inside* them are
+    // reused deliberately: a redone note keeps its identity, so an op that
+    // addressed it before the undo still addresses it after the redo.
+    const batch: OpBatch = { id: nextId("k"), ops: entry.ops, label: `Redo ${entry.label}` };
+    commitListenerRef.current?.(batch);
+    logRef.current.push(batch);
+    publish({
+      ...fold(prev, batch),
+      past: [...prev.past, entry],
+      future: prev.future.slice(1),
     });
-  }, []);
+  }, [publish]);
 
   /**
    * Applies a batch the server has ordered, from anyone including this client.
    *
-   * Local history is dropped either way. A snapshot taken before someone else's
-   * edit no longer describes any document the group shares, so restoring it
-   * would erase their work. History gated only on "is the socket live" was
-   * worse than useless: the moment a session ended or the connection dropped,
-   * one Ctrl+Z reinstated a pre-collab snapshot and autosaved it over
-   * everything the session produced.
+   * History survives, which snapshot undo could not allow: a snapshot taken
+   * before someone else's edit describes no document the group shares, so
+   * restoring it erased their work — and once a session ended, one Ctrl+Z
+   * reinstated a pre-collab document and autosaved it over everything the
+   * session had produced. An inverse op names the entities it restores instead,
+   * so it stays valid across a collaborator's edit and inert once they have
+   * deleted what it points at.
    */
-  const applyRemote = useCallback((batch: OpBatch) => {
-    setState((prev) => {
+  const applyRemote = useCallback(
+    (batch: OpBatch) => {
+      const prev = stateRef.current;
       if (!prev.live) {
         const nextScore = applyBatch(prev.score, batch);
-        if (nextScore === prev.score) return prev;
-        return { ...prev, score: nextScore, past: [], future: [] };
+        if (nextScore === prev.score) return;
+        publish({ ...prev, score: nextScore });
+        return;
       }
       // Advance server truth, retire our copy of this batch if it was ours,
       // and rebuild the view. Everything still pending replays on top.
       const live = serverBatch(prev.live, batch);
-      return { score: sessionView(live), past: [], future: [], live };
-    });
-  }, []);
+      if (live === prev.live) return;
+      publish({ ...prev, score: sessionView(live), live });
+    },
+    [publish],
+  );
 
   /**
    * Hands ordering to the server, or takes it back when the session ends.
@@ -162,14 +244,16 @@ export function useEditor() {
    * a message that arrives in the same tick as the connection cannot be
    * applied under the wrong ordering rule.
    */
-  const setLiveOrdering = useCallback((on: boolean) => {
-    setState((prev) => {
-      if (on === (prev.live !== null)) return prev;
+  const setLiveOrdering = useCallback(
+    (on: boolean) => {
+      const prev = stateRef.current;
+      if (on === (prev.live !== null)) return;
       // Whatever is on screen when a session starts is the base everyone
       // builds on; when it ends, the projection is simply the document.
-      return on ? { ...prev, live: beginSession(prev.score) } : { ...prev, live: null };
-    });
-  }, []);
+      publish({ ...prev, live: on ? beginSession(prev.score) : null });
+    },
+    [publish],
+  );
 
   const setCommitListener = useCallback((listener: ((batch: OpBatch) => void) | null) => {
     commitListenerRef.current = listener;
@@ -388,17 +472,24 @@ export function useEditor() {
    * the snapshot a joiner is handed *is* the confirmed state, and anything
    * pending against the old document has no meaning against the new one.
    */
-  const replaceDocument = useCallback((next: Score) => {
-    digitRef.current = null;
-    logRef.current = [];
-    setState((prev) => ({
-      score: next,
-      past: [],
-      future: [],
-      live: prev.live ? beginSession(next) : null,
-    }));
-    setCursor({ track: 0, bar: 0, beat: 0, string: 1 });
-  }, []);
+  const replaceDocument = useCallback(
+    (next: Score) => {
+      digitRef.current = null;
+      logRef.current = [];
+      const prev = stateRef.current;
+      // History goes with the old document. An inverse op addresses entities by
+      // id, so against a different score it would either find nothing or, worse,
+      // find the one thing whose id happened to carry over.
+      publish({
+        score: next,
+        past: [],
+        future: [],
+        live: prev.live ? beginSession(next) : null,
+      });
+      setCursor({ track: 0, bar: 0, beat: 0, string: 1 });
+    },
+    [publish],
+  );
 
   const newScore = useCallback(
     (title = "New Score") => replaceDocument(createScore(title)),

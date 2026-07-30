@@ -8,7 +8,7 @@
  *
  * Load-bearing invariant: an op that changes nothing returns the *same
  * reference*. Callers use identity to decide whether to bump the revision,
- * push an undo snapshot, log the batch, or re-render, so an op that rebuilt an
+ * record an undo step, log the batch, or re-render, so an op that rebuilt an
  * unchanged branch would inflate revisions (diverging between collaborators
  * who receive a duplicate broadcast), add empty undo steps, and cause
  * pointless re-renders. Every case below therefore compares before rebuilding.
@@ -61,6 +61,30 @@ function mapNotes(score: Score, fn: Mapper<Note>): Score {
     const notes = mapArray(beat.notes, fn);
     return notes ? { ...beat, notes } : beat;
   });
+}
+
+/**
+ * Whether two note lists are the same music in the same order.
+ *
+ * `note.insert` is the one op that cannot answer this by rebuilding and
+ * comparing references, because the note it carries arrives as fresh JSON over
+ * the socket — a redelivered insert would produce an identical beat that is not
+ * the same object, breaking the identity invariant this file rests on.
+ */
+function sameNote(a: Note, b: Note): boolean {
+  return (
+    a.id === b.id &&
+    a.pitch === b.pitch &&
+    a.string === b.string &&
+    a.fret === b.fret &&
+    a.tiedToNext === b.tiedToNext &&
+    a.articulations.length === b.articulations.length &&
+    a.articulations.every((art, i) => art === b.articulations[i])
+  );
+}
+
+function sameNotes(a: readonly Note[], b: readonly Note[]): boolean {
+  return a.length === b.length && a.every((note, i) => note === b[i] || sameNote(note, b[i]!));
 }
 
 function withBeat(score: Score, beatId: string, fn: Mapper<Beat>): Score {
@@ -131,6 +155,12 @@ export function applyOp(score: Score, op: Op): Score {
     case "bar.setTimeSignature":
       return mapBars(score, (b) => {
         if (b.id !== op.barId) return b;
+        // null clears it, so the bar inherits the previous signature again.
+        if (op.timeSignature === null) {
+          if (b.timeSignature === undefined) return b;
+          const { timeSignature, ...rest } = b;
+          return rest;
+        }
         const same =
           b.timeSignature?.beats === op.timeSignature.beats &&
           b.timeSignature?.beatValue === op.timeSignature.beatValue;
@@ -167,8 +197,12 @@ export function applyOp(score: Score, op: Op): Score {
     case "note.insert":
       return withBeat(score, op.beatId, (b) => {
         // One note per string: entering a fret replaces what was there.
-        const notes = b.notes.filter((n) => n.string !== op.note.string);
-        return { ...b, notes: [...notes, op.note] };
+        const kept = b.notes.filter((n) => n.string !== op.note.string);
+        // Note entry appends; undo supplies an index to put a displaced note
+        // back where it was, so a chord keeps the order it had.
+        const at = op.index === undefined ? kept.length : Math.max(0, Math.min(op.index, kept.length));
+        const notes = [...kept.slice(0, at), op.note, ...kept.slice(at)];
+        return sameNotes(b.notes, notes) ? b : { ...b, notes };
       });
 
     case "note.remove":

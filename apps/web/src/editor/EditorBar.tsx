@@ -49,7 +49,7 @@ const MORE_ARTICULATIONS: Array<[string, Articulation]> = [
 ];
 
 /** Global key handling, so the editor behaves like a desktop app. */
-function useEditorKeys(e: EditorController, enabled: boolean, allowHistory: boolean) {
+function useEditorKeys(e: EditorController, enabled: boolean) {
   useEffect(() => {
     if (!enabled) return;
     const onKey = (ev: KeyboardEvent) => {
@@ -66,10 +66,9 @@ function useEditorKeys(e: EditorController, enabled: boolean, allowHistory: bool
 
       if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === "z") {
         ev.preventDefault();
-        // Undo is snapshot-based and local, so during a live session it would
-        // silently fork the document from the other members. Disabled until
-        // collaborative undo lands as broadcast inverse ops.
-        if (!allowHistory) return;
+        // Works during a live session too: undo sends the inverse of this
+        // client's own edit through the server like any other batch, so the room
+        // stays converged and nobody else's work is touched.
         if (ev.shiftKey) e.redo();
         else e.undo();
         return;
@@ -98,7 +97,7 @@ function useEditorKeys(e: EditorController, enabled: boolean, allowHistory: bool
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [e, enabled, allowHistory]);
+  }, [e, enabled]);
 }
 
 /** Commits on blur or Enter, so typing does not flood the op log. */
@@ -151,20 +150,12 @@ function MetaField({
   );
 }
 
-export function EditorBar({
-  e,
-  enabled,
-  allowHistory = true,
-}: {
-  e: EditorController;
-  enabled: boolean;
-  allowHistory?: boolean;
-}) {
-  useEditorKeys(e, enabled, allowHistory);
+export function EditorBar({ e, enabled }: { e: EditorController; enabled: boolean }) {
+  useEditorKeys(e, enabled);
 
   const note = e.currentBeat?.notes.find((n) => n.string === e.cursor.string);
-  const canUndo = allowHistory && e.canUndo;
-  const canRedo = allowHistory && e.canRedo;
+  const canUndo = e.canUndo;
+  const canRedo = e.canRedo;
 
   return (
     <div
@@ -260,7 +251,7 @@ export function EditorBar({
         size="sm"
         onClick={e.undo}
         disabled={!canUndo}
-        title={allowHistory ? "Undo (Cmd+Z)" : "Undo is unavailable during a live session"}
+        title="Undo (Cmd+Z)"
       >
         UNDO
       </Button>
@@ -268,7 +259,7 @@ export function EditorBar({
         size="sm"
         onClick={e.redo}
         disabled={!canRedo}
-        title={allowHistory ? "Redo (Cmd+Shift+Z)" : "Undo is unavailable during a live session"}
+        title="Redo (Cmd+Shift+Z)"
       >
         REDO
       </Button>

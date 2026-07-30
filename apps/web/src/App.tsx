@@ -365,7 +365,7 @@ export function App() {
       {error && !performing && <ErrorBanner message={error} />}
 
       {editing && !performing && (
-        <EditorBar e={editor} enabled={editing && !performing} allowHistory={collab.status !== "live"} />
+        <EditorBar e={editor} enabled={editing && !performing} />
       )}
       {/* Also shown in the player, for an import that converted to nothing
           editable: that user never presses EDIT, so gating this on the editor

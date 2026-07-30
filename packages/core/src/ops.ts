@@ -33,12 +33,23 @@ export type OpKind =
     | { type: "bar.insert"; trackId: Id; index: number; bar: Bar }
     | { type: "bar.remove"; trackId: Id; barId: Id }
     | { type: "bar.setTempo"; barId: Id; tempoBpm: number | null }
-    | { type: "bar.setTimeSignature"; barId: Id; timeSignature: TimeSignature }
+    /**
+     * `null` clears the bar's own signature so it inherits the previous one
+     * again. Needed so a meter change can be undone: without it the inverse
+     * would have to write 4/4 into a bar that never carried a signature,
+     * engraving one mid-score that was not there before.
+     */
+    | { type: "bar.setTimeSignature"; barId: Id; timeSignature: TimeSignature | null }
     | { type: "beat.insert"; voiceId: Id; index: number; beat: Beat }
     | { type: "beat.remove"; voiceId: Id; beatId: Id }
     | { type: "beat.setDuration"; beatId: Id; duration: Duration }
     | { type: "beat.setDots"; beatId: Id; dots: 0 | 1 | 2 }
-    | { type: "note.insert"; beatId: Id; note: Note }
+    /**
+     * `index` places the note within the beat's chord. Omitted for note entry,
+     * which appends; supplied when undo restores a note that was displaced, so
+     * a chord's notes come back in the order they were in rather than resorted.
+     */
+    | { type: "note.insert"; beatId: Id; note: Note; index?: number }
     | { type: "note.remove"; noteId: Id }
     | { type: "note.setPitch"; noteId: Id; pitch: number }
     | { type: "note.setFingering"; noteId: Id; string: number; fret: number }

@@ -161,12 +161,60 @@ export async function run({ browser, baseUrl, recorder }) {
   await latecomer.page.close();
   await host.page.waitForTimeout(1200);
 
-  // Undo is disabled while live: local snapshot undo would fork the document.
-  const beforeUndo = await scoreText(host.page);
+  // Undo works during the session, as the inverse of this client's own last
+  // edit sent through the server. Three things have to hold at once: the edit
+  // is actually taken back, the room stays converged, and the guest's work —
+  // made *after* the host's edit — survives the host undoing.
+  // The host's last edit was the conflicting fret 4 on this beat, which
+  // overwrote the fret 7 it typed at the start. So undo has one right answer,
+  // whichever of the two conflicting frets the server happened to order last:
+  // fret 7 comes back, on both machines.
   await host.page.keyboard.press("Control+z");
-  await host.page.waitForTimeout(1400);
-  recorder.check("Ctrl+Z is inert during a live session", (await scoreText(host.page)) === beforeUndo);
-  recorder.check("still converged after the undo attempt", (await scoreText(host.page)) === (await scoreText(guest.page)));
+  await host.page.waitForTimeout(1800);
+  recorder.check(
+    "Ctrl+Z restores what the host's own edit overwrote",
+    (await fretAt(host.page)) === "7",
+    `fret ${await fretAt(host.page)} (was ${hostFret})`,
+  );
+  recorder.check(
+    "the undo reached the guest, so the room stays converged",
+    (await scoreText(host.page)) === (await scoreText(guest.page)),
+  );
+  recorder.check("the guest sees the restored fret too", (await fretAt(guest.page)) === "7");
+
+  // Redo re-sends the original ops, so the host's fret 4 lands again — and
+  // lands last, which is why this is 4 rather than whichever fret won the
+  // original race.
+  await host.page.keyboard.press("Control+Shift+z");
+  await host.page.waitForTimeout(1800);
+  recorder.check("redo puts the host's edit back", (await fretAt(host.page)) === "4");
+  recorder.check(
+    "the redo reached the guest too",
+    (await scoreText(host.page)) === (await scoreText(guest.page)) && (await fretAt(guest.page)) === "4",
+  );
+
+  // The case snapshot undo could never handle: the host undoes an edit made
+  // before the guest's latest one, and the guest's note has to survive it.
+  await host.page.keyboard.press("Digit2");
+  await host.page.waitForTimeout(1200);
+  await guest.page.keyboard.press("ArrowRight");
+  await guest.page.keyboard.press("ArrowRight");
+  await guest.page.keyboard.press("Digit8");
+  await guest.page.waitForTimeout(1600);
+  const guestNoteBar = await guest.page.locator("text=/bar 1 · beat 3 · string 1/").first().innerText();
+  recorder.check("the guest's later note landed", /fret 8/.test(guestNoteBar), guestNoteBar);
+  await host.page.keyboard.press("Control+z");
+  await host.page.waitForTimeout(1800);
+  const survived = await guest.page.locator("text=/bar 1 · beat 3 · string 1/").first().innerText();
+  recorder.check(
+    "the guest's later edit survives the host's undo",
+    /fret 8/.test(survived),
+    survived,
+  );
+  recorder.check(
+    "still converged after undoing across a collaborator's edit",
+    (await scoreText(host.page)) === (await scoreText(guest.page)),
+  );
 
   // A guest owns no library entry, so they must be offered a way to keep the
   // work; the host, whose entry autosaves, must not see the offer.
