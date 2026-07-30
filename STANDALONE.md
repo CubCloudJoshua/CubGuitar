@@ -30,6 +30,9 @@ a problem or that it is not.
 | Fingering solver and arranger | `fingering.ts`, `arrange.ts` | Where a pitch goes on a neck, as an op batch. |
 | Pitch and onset detection | `pitch.ts` | YIN over a `Float32Array`. No Web Audio, no DOM, no alphaTab. |
 | Practice grading | `listen.ts` | What was heard against what `timeline()` says. Ours entirely. |
+| Practice history | `practice.ts` | Which bars you fail, and the tempo you can play them at. |
+| Recording alignment | `sync.ts` | The map between a record's clock and the score's. |
+| MusicXML, both directions | `to-musicxml.ts`, `from-musicxml.ts`, `xml.ts` | Including the XML parser, so neither half needs a dependency. |
 
 **What alphaTab does for us:**
 

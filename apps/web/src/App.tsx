@@ -15,6 +15,9 @@ import { IsoPanel } from "./iso/IsoView";
 import { useListening } from "./listen/useListening";
 import { BarHeat, ListenReadout, PracticeStrip } from "./listen/ListenPanel";
 import { usePracticeHistory } from "./listen/usePracticeHistory";
+import { useRecording } from "./sync/useRecording";
+import { RecordingAudio, RecordingBar } from "./sync/RecordingBar";
+import { alignmentOf, type Alignment } from "@cubscore/core";
 import { frettedGuitar, STANDARD_BASS, timeline as buildTimeline } from "@cubscore/core";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
@@ -52,12 +55,31 @@ export function App() {
    * One playhead for the room (collab/useSharedTransport). Wraps the transport so a
    * local play, pause, stop or seek tells the session, and applies the room's.
    */
+  /**
+   * The recording, if there is one, read by the transport below.
+   *
+   * A ref because the transport is built before the recording controller exists and
+   * needs to be able to ask about it — see the seek below for why it has to.
+   */
+  const recordingRef = useRef<{ playing: boolean; seekToScore: (s: number) => void } | null>(null);
   const transport = useSharedTransport({
     target: {
       playing: c.playing,
       playPause: c.playPause,
       stop: c.stop,
-      seekTo: c.seekTo,
+      /**
+       * Seeking moves the recording when a recording is the clock.
+       *
+       * Without this, scrubbing while a record plays appears to do nothing: the score
+       * jumps and the follow drags it straight back to wherever the audio is, a quarter
+       * of a second later. Moving the audio instead makes the score follow it there,
+       * which is the same rule the rest of the feature runs on — one clock, one truth.
+       */
+      seekTo: (seconds) => {
+        const rec = recordingRef.current;
+        if (rec?.playing) rec.seekToScore(seconds);
+        else c.seekTo(seconds);
+      },
       positionSeconds: c.positionSeconds,
     },
     live: collab.status === "live",
@@ -205,6 +227,26 @@ export function App() {
    * that survives closing the piece and coming back to it tomorrow.
    */
   const practice = usePracticeHistory(editing ? lib.currentId ?? null : null);
+
+  /**
+   * A recording locked to the score (sync/useRecording).
+   *
+   * The marks live in this component's state rather than in the library, deliberately for
+   * now: the audio itself is an object URL that dies with the tab, so storing an
+   * alignment that outlives the file it aligns would leave a user with marks against a
+   * recording the app cannot find. Persisting both together is the next step and belongs
+   * with the audio, not ahead of it.
+   */
+  const [alignment, setAlignment] = useState<Alignment>(() => alignmentOf([]));
+  const [recordingOpen, setRecordingOpen] = useState(false);
+  const audioInputRef = useRef<HTMLInputElement>(null);
+  const recording = useRecording({
+    seekTo: c.seekTo,
+    setSynthMuted: c.setSynthMuted,
+    saved: alignment,
+    onAlignmentChange: setAlignment,
+  });
+  recordingRef.current = { playing: recording.playing, seekToScore: recording.seekToScore };
   /**
    * Stores a take when playback stops.
    *
@@ -252,6 +294,7 @@ export function App() {
       setPerforming(true);
     },
     listening,
+    recording: { open: recordingOpen, toggle: () => setRecordingOpen((v) => !v) },
     onArrange: (kind) => {
       const instrument =
         kind === "bass"
@@ -388,6 +431,16 @@ export function App() {
             FRETBOARD
           </Button>
         )}
+        {!shared.active && !performing && c.score && (
+          <Button
+            variant="outline"
+            active={recordingOpen}
+            onClick={() => setRecordingOpen((v) => !v)}
+            title="Play a recording with the score: attach audio and tap SYNC on a beat"
+          >
+            RECORDING
+          </Button>
+        )}
         {editing && !performing && (
           <Button
             variant="outline"
@@ -463,6 +516,23 @@ export function App() {
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) switchDocument(() => void lib.importFile(file));
+            e.target.value = "";
+          }}
+        />
+        {/* After the score input, deliberately. This one takes audio to play *with* a
+            score rather than a score, and it is second because the score input is the
+            primary one: anything selecting `input[type="file"]` without qualifying it
+            should get the one that opens music, not the one that attaches a backing
+            track. */}
+        <input
+          ref={audioInputRef}
+          type="file"
+          accept="audio/*"
+          data-audio-input=""
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) recording.attach(file);
             e.target.value = "";
           }}
         />
@@ -548,6 +618,15 @@ export function App() {
           summary={practice.summary}
           barCount={editor.score.tracks[editor.cursor.track]?.bars.length ?? 0}
           onClear={practice.clear}
+        />
+      )}
+      {/* Outside the bar, so hiding the controls does not stop the music. */}
+      <RecordingAudio recording={recording} />
+      {recordingOpen && !performing && (
+        <RecordingBar
+          recording={recording}
+          scoreSeconds={c.position.currentTime / 1000}
+          onPick={() => audioInputRef.current?.click()}
         />
       )}
       {showListening && (

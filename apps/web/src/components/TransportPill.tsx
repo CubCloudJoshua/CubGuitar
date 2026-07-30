@@ -292,6 +292,14 @@ export function TransportPill({ c, transport }: { c: AlphaTabController; transpo
         >
           {formatTime(c.position.currentTime / 1000)} / {formatTime(c.position.endTime / 1000)}
         </span>
+        {/* The playhead in seconds, for tests that need to know where the score is
+            rather than what the clock rounded it to. The readout above is minutes and
+            seconds, and a check written against it cannot see half a bar of drift. */}
+        <span
+          data-score-seconds={(c.position.currentTime / 1000).toFixed(2)}
+          style={{ display: "none" }}
+          aria-hidden="true"
+        />
 
         {/*
           Scrubbable. It looked like a progress bar and had always been inert,

@@ -103,7 +103,22 @@ a week.
 
 ---
 
-## 3. Practice as a stored object
+## 3. Practice as a stored object — **shipped**
+
+Built as `packages/core/src/practice.ts`, with takes in their own IndexedDB store and a
+strip above the score that is always on rather than behind a button.
+
+Two judgements in it are the whole differentiator. Tempo is stored with the take and it
+is the *effective* tempo, so a clean pass at half speed is not recorded as a clean pass;
+and a passage's tempo is the tempo of its worst bar, not its best, because "I can play
+it at 120" means all of it. Nobody else records either number. And a bar's due date
+doubles with each consecutive clean pass, which is the spaced-repetition idea that
+exists for vocabulary and not for bars of music.
+
+What is not built: sharing a practice record with a teacher, and anything across pieces.
+The store is per score.
+
+
 
 Every competitor treats a practice session as ephemeral. We store an op log
 already; storing a **performance log** is the same idea applied to playing rather
@@ -120,11 +135,9 @@ What it gives, none of which anyone offers:
 - The tempo you can actually play a passage at, tracked over time, which is the
   number every guitarist cares about and nobody records.
 
-**What it depends on.** Knowing what you played, which is §4 and is now built. The
-per-bar report `compareToTimeline` returns is exactly the record this would store: it
-already carries, per bar, what was played, what was missed, what was wrong and how
-far off the beat it was. What is missing is persistence and the analysis over time —
-storing a take, comparing takes, and scheduling the bars you keep failing.
+**What it depended on.** Knowing what you played, which is §4. Both are now built, and
+the analysis takes a plain per-bar record rather than a `ListenReport`, so a take could
+equally come from a MIDI keyboard or from a teacher tapping "got it".
 
 ---
 

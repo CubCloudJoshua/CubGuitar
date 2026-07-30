@@ -350,6 +350,19 @@ export function useAlphaTab() {
   const positionSeconds = useCallback(() => (apiRef.current?.timePosition ?? 0) / 1000, []);
 
   /** Nudges playback, for the coarse seeking a player wants mid-song. */
+  /**
+   * Silences the synth without touching the transport.
+   *
+   * For a recording playing with the score: the record is making the sound, and the
+   * synth playing the same music a beat out is the worst possible result. Master volume
+   * rather than muting every track, so the user's own per-track mutes are untouched and
+   * come back exactly as they were.
+   */
+  const setSynthMuted = useCallback((muted: boolean) => {
+    const api = apiRef.current;
+    if (api) api.masterVolume = muted ? 0 : 1;
+  }, []);
+
   const seekSeconds = useCallback((delta: number) => {
     const api = apiRef.current;
     if (!api) return;
@@ -451,6 +464,7 @@ export function useAlphaTab() {
     setZoom,
     setStageEngraving,
     seekSeconds,
+    setSynthMuted,
     seekFraction,
     seekTo,
     positionSeconds,

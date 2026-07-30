@@ -76,6 +76,13 @@ function open(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("indexedDB open failed"));
+    // A version upgrade waits for every other connection to close, and every connection
+    // here closes at the end of its transaction, so this resolves on its own in the
+    // normal case. It is handled anyway because the abnormal case — another tab wedged
+    // mid-transaction — is otherwise a promise that never settles and a library that
+    // never appears, with nothing at all on screen to say why.
+    request.onblocked = () =>
+      reject(new Error("Another tab is using CubScore's library. Close it and reload."));
   });
 }
 

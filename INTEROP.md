@@ -105,7 +105,30 @@ it in a demo.
 
 ---
 
-## 2. Sheet music: MusicXML
+## 2. Sheet music: MusicXML — **shipped, both directions**
+
+Built as `packages/formats/src/to-musicxml.ts`, `from-musicxml.ts` and a small owned
+XML parser (`xml.ts`) so both halves run in Node and in a browser without a dependency
+in the middle of the path STANDALONE.md depends on. Import goes through our reader
+rather than being handed to alphaTab, which is what makes a report of what was dropped
+possible at all.
+
+`pnpm musicxml` hands our file to alphaTab's own MusicXML reader and grades three
+things: whether a stranger reads what we meant, whether the two readers disagree and
+where, and how many notes came back still carrying a string and a fret. 12 of 12 scores
+agree, with 11,029 and 5,721 fingered notes intact on the two real files.
+
+What is not carried, and says so: `.mxl` (a zip, still alphaTab's), timewise files (with
+an instruction to re-export), grace notes, unpitched percussion, slurs, dynamics,
+lyrics, chord symbols, alternate endings, and multi-staff parts (both staves are read
+into one). Bend depth is written as a whole step because the model holds no amount, and
+the report says so.
+
+The notes below are the design as planned. They held up, with one correction: alphaTab
+derives a note's pitch from `<string>` and `<fret>` on a tab staff rather than from
+`<pitch>`, so the fingering is authoritative on the way out and has to be right.
+
+
 
 The interchange format for notation. MuseScore, Finale, Sibelius, Dorico and
 Notion all read and write it, which makes it the single format that connects
@@ -264,11 +287,13 @@ Value per unit of risk, same as STANDALONE.md.
    keep on the messy cases: lyrics and chord names around the staff, a missing
    string line, ragged bar lines, the tuning stated in prose. Rhythm is reported as
    not carried on every import, always.
-3. **MusicXML import.** Weeks. Carries tablature natively, so it is the highest
-   fidelity import available and needs no fingering inference.
-4. **Percussion in the model.** Weeks. Unblocks four separate things and closes the
-   gap our own import reports name most often.
-5. **MusicXML export.** Weeks. Opens the notation-world direction.
+3. ~~**MusicXML import.**~~ Shipped, with export beside it. It did carry tablature
+   natively as predicted, and the fingering survives a round trip through an
+   independent reader, which is the claim most exporters cannot make.
+4. ~~**MusicXML export.**~~ Shipped.
+5. **Percussion in the model.** Weeks. Unblocks four separate things and closes the
+   gap our own import reports name most often. Now the largest remaining hole: MusicXML
+   writes a drum part as pitched notes and reports it, which is honest and not right.
 6. **MIDI file import**. Weeks. The fingering half is done; what remains is
    quantisation and track splitting, and it is the first place a model earns its
    keep on musical judgement rather than plumbing.

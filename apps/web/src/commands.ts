@@ -28,6 +28,8 @@ interface CommandDeps {
   onArrange: (kind: "guitar" | "bass") => void;
   /** The microphone, graded against the score; see listen/useListening. */
   listening: { on: boolean; toggle: () => void };
+  /** A recording playing with the score; see sync/useRecording. */
+  recording: { open: boolean; toggle: () => void };
   /** Runs an action that changes which document is open. See App.tsx. */
   switchDocument: (open: () => void) => void;
 }
@@ -50,6 +52,18 @@ export function useCommands(deps: CommandDeps): Command[] {
     add({ id: "countin", title: c.countIn ? "Turn count-in off" : "Turn count-in on", section: "Playback", run: c.toggleCountIn });
     for (const speed of [0.5, 0.75, 1]) {
       add({ id: `speed-${speed}`, title: `Set speed to ${speed * 100}%`, section: "Playback", run: () => c.setSpeed(speed) });
+    }
+
+    // A recording plays with the score in the player as well as the editor: reading
+    // along to the record is what most people want it for, and that does not require
+    // owning the document.
+    if (c.score) {
+      add({
+        id: "recording",
+        title: deps.recording.open ? "Hide the recording controls" : "Play a recording with the score",
+        section: "Practice",
+        run: deps.recording.toggle,
+      });
     }
 
     if (!sharedView) {
