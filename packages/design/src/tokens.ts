@@ -44,6 +44,31 @@ export const color = {
  */
 export const presence = ["#4EC9E8", "#B08CFF", "#FFD166", "#5DD39E", "#FF8FB1"] as const;
 
+/**
+ * Practice heat: how a bar went, painted on the bar itself.
+ *
+ * The second sanctioned exception, for the same reason as the first — the accent
+ * means playing, selected or primary action, and a bar that went badly is none of
+ * those. Drawn from the presence hues rather than invented, since those are already
+ * chosen to stay legible on near-black and to avoid a red-green pair, which matters
+ * more here than anywhere else in the product: this is the one surface whose whole
+ * job is to be read at a glance.
+ *
+ * Colour is never the only signal. The readout beside the score states the same
+ * thing in numbers, because a heatmap alone is unreadable to a fair number of people
+ * and unreadable in a photograph of a screen to everybody.
+ */
+export const heat = {
+  /** Played, in time. */
+  clean: "#5DD39E",
+  /** Played, but not all of it, or not in time. */
+  weak: "#FFD166",
+  /** Wrong notes, or nothing at all. */
+  wrong: "#FF8FB1",
+  /** Nothing to judge: a bar of rests, or notes a monophonic pass cannot check. */
+  unheard: "#4A4A4A",
+} as const;
+
 export const font = {
   /** Data readouts: positions, tempo, tuning, code-like text. */
   mono: '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace',

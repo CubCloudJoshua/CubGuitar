@@ -27,6 +27,9 @@ a problem or that it is not.
 | Accounts, library, sharing | `services/api`, `apps/web/src/library` | Ours entirely. |
 | Design system | `packages/design` | Ours entirely. |
 | Fretboard reader | `apps/web/src/iso` | The first view drawn from our model rather than alphaTab's. |
+| Fingering solver and arranger | `fingering.ts`, `arrange.ts` | Where a pitch goes on a neck, as an op batch. |
+| Pitch and onset detection | `pitch.ts` | YIN over a `Float32Array`. No Web Audio, no DOM, no alphaTab. |
+| Practice grading | `listen.ts` | What was heard against what `timeline()` says. Ours entirely. |
 
 **What alphaTab does for us:**
 
@@ -146,6 +149,16 @@ audible-window share for every score. Extend it to compare our render against
 alphaTab's on the same score: per-window RMS envelope correlation, so "it plays,
 and it plays the same shape" is a number. Plus a null test that has caught this
 class of bug before — a score whose notes are all removed must produce silence.
+
+### A note for Phase P: one audio context, not two
+
+`apps/web/src/listen/useListening.ts` opens its own `AudioContext` for the microphone
+because alphaTab does not expose the one its synth uses. When playback becomes ours,
+the input and the output should share a context. Two reasons, and the second is the
+one that matters: a shared context means one sample rate and no resampling on the
+input path, and it means the playhead and the microphone are clocked by the same
+oscillator, so the timing figure in a practice report stops carrying the drift between
+two independent clocks as noise.
 
 ## 5. Phase I and Phase X — files in and out
 

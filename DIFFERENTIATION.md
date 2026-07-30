@@ -120,27 +120,51 @@ What it gives, none of which anyone offers:
 - The tempo you can actually play a passage at, tracked over time, which is the
   number every guitarist cares about and nobody records.
 
-**What it depends on.** Knowing what you played, which is §4. But the *storage and
-analysis* half can be built against manual input first ("I got this wrong"), and
-that alone is more than the category offers.
+**What it depends on.** Knowing what you played, which is §4 and is now built. The
+per-bar report `compareToTimeline` returns is exactly the record this would store: it
+already carries, per bar, what was played, what was missed, what was wrong and how
+far off the beat it was. What is missing is persistence and the analysis over time —
+storing a take, comparing takes, and scheduling the bars you keep failing.
 
 ---
 
-## 4. Listening: what you played against what is written
+## 4. Listening: what you played against what is written — **shipped**
 
 Rocksmith does this with a proprietary cable. Yousician does it with a microphone
 and only on their own closed catalogue. **Nobody does it against your own tabs.**
 
-We have the expected side already: `timeline()` says which note should sound at
-which second. The missing half is a detector — onset and pitch from the microphone,
-in the browser, in real time. That is a small on-device model plus Web Audio, not a
-GPU problem, which makes it independent of §2.
+Built as `packages/core/src/pitch.ts` (YIN pitch detection and onset), `listen.ts`
+(the comparison and the report) and `apps/web/src/listen/` (the microphone and the
+overlay). The detector takes a `Float32Array` rather than a Web Audio node, which is
+what lets the numerical half be tested against synthesized waveforms at known
+frequencies with no browser in the loop.
 
-The output is the interesting part. Not a score out of ten, which is what the
-game-shaped products give: a list of the bars you missed and *how* — early, late,
-wrong string, right note wrong fret. The fingering solver knows which positions were
-plausible, so "you played that at the fifth fret and the tab says the twelfth" is a
-statement we can make and they cannot.
+Two things about it are worth defending in a demo, because both are refusals:
+
+- A note the pass cannot judge is reported as **unverified**, not missed. A
+  single-pitch detector hears a strummed chord as one note; calling the other five
+  missed would tell a guitarist they failed to play notes they played, and a report
+  you have to argue with is a report you stop reading.
+- A **wrong note and a missing note are different findings**, because they have
+  different fixes. Collapsing both into "error" throws away the only part of the
+  report that says what to work on.
+
+What ships is the bar-level report: per bar, how many notes were played, how many
+were wrong, how many were missed, and the signed mean timing — whether you rush or
+drag, which is a different problem from playing wrong notes and the one a metronome
+cannot diagnose for you.
+
+**Not yet built, and the more interesting claim:** "you played that at the fifth fret
+and the tab says the twelfth". The fingering solver knows which positions were
+plausible for a detected pitch (`positionsFor`), so this is a matter of joining two
+things that already exist rather than new capability.
+
+**Named limitations, both surfaced in the UI rather than buried.** A microphone hears
+the app's own playback, so the measurement is only about a person if they wear
+headphones. And the path from a string to a frame carries a latency we account for in
+part (the analysis window exactly, `baseLatency` where the browser reports it) and
+cannot fully know, so the timing figure carries an unknown constant offset. Stating
+that is better than presenting a millisecond number as though it were calibrated.
 
 ---
 
@@ -208,7 +232,8 @@ the reader already shows the result; what is missing is one op and a command. It
 turns a capability into a feature.
 
 **Then §4**, because §3 depends on it and because it is the piece that makes practice
-measurable.
+measurable. *Shipped.* §3 is now the next thing standing on built ground: the report
+exists per take, and what it needs is to be stored and compared across takes.
 
 **§2 is the flagship and should be scoped as research**, not as a sprint. It is the
 right thing to be pointing at and the wrong thing to promise a date for.

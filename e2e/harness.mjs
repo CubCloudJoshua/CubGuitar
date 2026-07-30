@@ -14,8 +14,18 @@ const SANDBOX_CHROMIUM = "/opt/pw-browsers/chromium";
 export const CHROMIUM =
   process.env.CHROMIUM_PATH ?? (existsSync(SANDBOX_CHROMIUM) ? SANDBOX_CHROMIUM : undefined);
 
-export function launchBrowser() {
-  return chromium.launch(CHROMIUM ? { executablePath: CHROMIUM } : {});
+/**
+ * A browser for the suites.
+ *
+ * `args` is for the one suite that needs the browser itself configured rather than
+ * the page: fake media devices are a launch-time flag, so the listening suite stands
+ * up its own browser instead of sharing this one.
+ */
+export function launchBrowser(args = []) {
+  return chromium.launch({
+    ...(CHROMIUM ? { executablePath: CHROMIUM } : {}),
+    ...(args.length > 0 ? { args } : {}),
+  });
 }
 
 /** Console noise that is expected and not a defect. */

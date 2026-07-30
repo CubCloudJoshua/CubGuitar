@@ -12,6 +12,8 @@ import { PeerCarets, PeerRoster } from "./collab/PeerCarets";
 import { caretEntry, caretsVisible, JoinReveal, useJoinReveal } from "./collab/JoinReveal";
 import { useSharedTransport } from "./collab/useSharedTransport";
 import { IsoPanel } from "./iso/IsoView";
+import { useListening } from "./listen/useListening";
+import { BarHeat, ListenReadout } from "./listen/ListenPanel";
 import { frettedGuitar, STANDARD_BASS, timeline as buildTimeline } from "@cubscore/core";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
@@ -179,6 +181,22 @@ export function App() {
     const fretted = editor.score.tracks.find((t) => t.instrument.kind === "fretted")?.instrument;
     return fretted ?? frettedGuitar();
   }, [editor.score, editor.cursor.track]);
+  /**
+   * The microphone, graded against the timeline (listen/useListening).
+   *
+   * Reads the same `scoreTimeline` the fretboard reader draws, which is the whole
+   * argument for having built that seam: one derivation of "which note when" now feeds
+   * a view, an exporter and a practice report.
+   */
+  const listening = useListening({
+    enabled: editing && !performing,
+    timeline: scoreTimeline,
+    trackIndex: editor.cursor.track,
+    positionSeconds: c.positionSeconds,
+    playing: c.playing,
+  });
+  const showListening = listening.on && editing && !performing;
+
   const currentEntry = lib.entries.find((e) => e.id === lib.currentId);
   const canEditCurrent = !shared.active && currentEntry?.core != null;
   const canShare = !shared.active && currentEntry !== undefined;
@@ -201,6 +219,7 @@ export function App() {
       if (editing) lib.leaveEditor();
       setPerforming(true);
     },
+    listening,
     onArrange: (kind) => {
       const instrument =
         kind === "bass"
@@ -335,6 +354,16 @@ export function App() {
             title="Fretboard reader: the neck in isometric view, notes arriving at a strike line"
           >
             FRETBOARD
+          </Button>
+        )}
+        {editing && !performing && (
+          <Button
+            variant="outline"
+            active={listening.on}
+            onClick={listening.toggle}
+            title="Listen: play along and see which bars you actually played, from the microphone"
+          >
+            LISTEN
           </Button>
         )}
         {/* Perform is a reading mode, so it leaves the editor on the way in:
@@ -479,6 +508,17 @@ export function App() {
         <ImportNoticeBanner notice={lib.importNotice} onDismiss={() => lib.setImportNotice(null)} />
       )}
 
+      {listening.error && !performing && <ErrorBanner message={listening.error} />}
+      {showListening && (
+        <ListenReadout
+          report={listening.report}
+          current={listening.current}
+          heard={listening.heard}
+          track={editor.score.tracks[editor.cursor.track]?.name ?? "Track"}
+          onClear={listening.clear}
+        />
+      )}
+
       {c.error && !performing && <ErrorBanner message={c.error} />}
 
       <main
@@ -555,6 +595,9 @@ export function App() {
           >
             <div ref={c.hostRef} />
             {editing && !performing && <BarMarkings e={editor} barBoxes={c.barBoxes} />}
+            {showListening && listening.report && (
+              <BarHeat report={listening.report} barBoxes={c.barBoxes} />
+            )}
             {collab.status === "live" && !performing && caretsVisible(revealPhase) && (
               <PeerCarets cursors={collab.cursors} barBoxes={c.barBoxes} entry={caretEntry(revealPhase)} />
             )}

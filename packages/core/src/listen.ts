@@ -171,29 +171,49 @@ export function compareToTimeline(
   const matched = new Map<number, HeardNote>();
   const taken = new Set<HeardNote>();
 
-  /**
-   * Every (written, heard) pair that could be the same note, cheapest first.
-   *
-   * Cost is time distance, with pitch distance as a tie-break, so when two written
-   * notes are equally close the heard note goes to the one it is actually in tune
-   * with. Pairs are considered globally rather than per note: a locally greedy walk
-   * gives an early note a match that a later note needed more.
-   */
+  /** One written note and one heard note that could be the same note. */
   interface Pair {
     at: number;
     heard: HeardNote;
     distance: number;
     cents: number;
   }
+
+  /**
+   * Every heard note close enough in time to a written one, found by walking rather
+   * than by scanning.
+   *
+   * Both lists are in time order, so the window into the heard notes only ever moves
+   * forward. Comparing every written note against every heard one is the obvious way
+   * and it is quadratic: a four-minute piece is a couple of thousand notes, a take of
+   * it is a couple of thousand more, and this runs several times a second while
+   * someone is playing. Walking makes it linear in the pairs that could match.
+   */
+  let scan = 0;
+  const near = (earliest: number, latest: number, visit: (h: HeardNote) => void) => {
+    while (scan < candidates.length && (candidates[scan]?.atSeconds ?? 0) < earliest) scan += 1;
+    for (let j = scan; j < candidates.length; j += 1) {
+      const h = candidates[j]!;
+      if (h.atSeconds > latest) break;
+      visit(h);
+    }
+  };
+
+  /**
+   * Every pair that could be the same note, cheapest first.
+   *
+   * Cost is time distance, with pitch distance as a tie-break, so when two written
+   * notes are equally close the heard note goes to the one it is actually in tune
+   * with. Pairs are considered across the whole passage rather than note by note: a
+   * locally greedy walk gives an early note a match that a later note needed more.
+   */
   const pairs: Pair[] = [];
   for (const [at, note] of expected.entries()) {
-    for (const h of candidates) {
-      const distance = Math.abs(h.atSeconds - note.startSeconds);
-      if (distance > tolerance) continue;
+    near(note.startSeconds - tolerance, note.startSeconds + tolerance, (h) => {
       const cents = centsBetween(h.midi, note.pitch);
-      if (Math.abs(cents) > centsTolerance) continue;
-      pairs.push({ at, heard: h, distance, cents });
-    }
+      if (Math.abs(cents) > centsTolerance) return;
+      pairs.push({ at, heard: h, distance: Math.abs(h.atSeconds - note.startSeconds), cents });
+    });
   }
   pairs.sort((a, b) => a.distance - b.distance || Math.abs(a.cents) - Math.abs(b.cents));
   for (const pair of pairs) {
@@ -207,14 +227,19 @@ export function compareToTimeline(
   // never spent proving a neighbour wrong.
   const wrong = new Map<number, HeardNote>();
   const wrongPairs: Pair[] = [];
+  scan = 0;
   for (const [at, note] of expected.entries()) {
-    if (matched.has(at)) continue;
-    for (const h of candidates) {
-      if (taken.has(h)) continue;
-      const distance = Math.abs(h.atSeconds - note.startSeconds);
-      if (distance > tolerance) continue;
-      wrongPairs.push({ at, heard: h, distance, cents: centsBetween(h.midi, note.pitch) });
-    }
+    // The walk has to advance for every written note, matched or not, or the window
+    // falls behind the one it is walking through.
+    near(note.startSeconds - tolerance, note.startSeconds + tolerance, (h) => {
+      if (matched.has(at) || taken.has(h)) return;
+      wrongPairs.push({
+        at,
+        heard: h,
+        distance: Math.abs(h.atSeconds - note.startSeconds),
+        cents: centsBetween(h.midi, note.pitch),
+      });
+    });
   }
   wrongPairs.sort((a, b) => a.distance - b.distance);
   for (const pair of wrongPairs) {
@@ -333,9 +358,27 @@ export interface ListenerOptions extends PitchOptions {
    * onset *time* and takes its pitch from the clearest frame in this window.
    */
   settleFrames?: number;
+  /**
+   * How often the pitch is read when no note is settling, in frames.
+   *
+   * Detection is the expensive part of this by a wide margin: 2.0ms for a
+   * 2048-sample frame, measured, which run on every animation frame is 120ms of every
+   * second and a main thread dropping frames while someone is trying to read music off
+   * it. Most of that work is wasted, because the pitch only *matters* on the few frames
+   * after an attack — that is where a note's pitch is decided.
+   *
+   * So a frame carrying an attack or a note still settling is always analysed, and the
+   * rest are sampled. Measured over four notes a second, which is a brisk practice
+   * tempo: 120ms per second of audio becomes 43ms, with every note still heard. Both
+   * things the pitch is used for survive it — notes keep the reading from their own
+   * settling window, and the live display updates ten times a second, which is faster
+   * than anyone can read it.
+   */
+  readoutFrames?: number;
 }
 
 const DEFAULT_SETTLE = 4;
+const DEFAULT_READOUT_FRAMES = 6;
 
 /**
  * A microphone's worth of frames, turned into notes.
@@ -351,6 +394,7 @@ export class Listener {
   /** The note being decided: its onset time, and the best reading seen so far. */
   private pending: { atSeconds: number; best: PitchReading | null; frames: number } | null = null;
   private last: PitchReading | null = null;
+  private seen = 0;
 
   constructor(
     private readonly sampleRate: number,
@@ -371,9 +415,14 @@ export class Listener {
    */
   push(frame: Float32Array, atSeconds: number): void {
     const settle = this.options.settleFrames ?? DEFAULT_SETTLE;
+    const every = this.options.readoutFrames ?? DEFAULT_READOUT_FRAMES;
+    this.seen += 1;
     const started = this.onset.push(rmsOf(frame));
-    const reading = detectPitch(frame, this.sampleRate, this.options);
-    this.last = reading;
+    // Analysed when it decides something — an attack, or a note still settling — and
+    // sampled otherwise. See `readoutFrames`.
+    const analyse = started || this.pending !== null || this.seen % every === 0;
+    const reading = analyse ? detectPitch(frame, this.sampleRate, this.options) : this.last;
+    if (analyse) this.last = reading;
 
     if (started) {
       // A new attack closes the previous note's window, however short it was: two
@@ -394,7 +443,13 @@ export class Listener {
     if (this.pending.frames >= settle) this.close();
   }
 
-  /** The pitch in the most recent frame, for a live tuner display. Null on silence. */
+  /**
+   * The pitch most recently read, for a live tuner display. Null on silence.
+   *
+   * "Most recently read" rather than "in the last frame": frames between attacks are
+   * sampled rather than all analysed, so this is at most a few frames old. For a
+   * display a human reads, that is not a distinction anyone can perceive.
+   */
   get current(): PitchReading | null {
     return this.last;
   }
@@ -422,6 +477,7 @@ export class Listener {
     this.settled.length = 0;
     this.pending = null;
     this.last = null;
+    this.seen = 0;
   }
 
   private close(): void {

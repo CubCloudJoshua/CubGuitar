@@ -61,8 +61,8 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
   size?: "sm" | "md";
 }
 
-export function Button({ variant = "ghost", active = false, size = "md", style, disabled, onMouseUp, ...rest }: ButtonProps) {
-  const base = buttonStyle(variant, active, disabled ?? false);
+export function Button({ variant = "ghost", active, size = "md", style, disabled, onMouseUp, ...rest }: ButtonProps) {
+  const base = buttonStyle(variant, active ?? false, disabled ?? false);
   if (size === "sm") {
     base.fontSize = typeScale.sm;
     base.padding = "5px 9px";
@@ -70,6 +70,12 @@ export function Button({ variant = "ghost", active = false, size = "md", style, 
   return (
     <button
       {...rest}
+      // A button given `active` is a toggle, and until now that was expressed only
+      // as a colour — so FRETBOARD, LISTEN, FOLLOWING and LIVE announced nothing
+      // about whether they were on. Emitted only when the prop was passed: telling a
+      // screen reader that an ordinary button is an unpressed toggle is its own kind
+      // of wrong.
+      {...(active === undefined ? {} : { "aria-pressed": active })}
       disabled={disabled}
       // Mouse clicks release focus so the spacebar stays the transport key;
       // keyboard focus is untouched, so tab-and-space activation still works.

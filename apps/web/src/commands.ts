@@ -26,6 +26,8 @@ interface CommandDeps {
   startPerforming: () => void;
   /** Arranges the caret's staff for a fretted instrument; see core/arrange. */
   onArrange: (kind: "guitar" | "bass") => void;
+  /** The microphone, graded against the score; see listen/useListening. */
+  listening: { on: boolean; toggle: () => void };
   /** Runs an action that changes which document is open. See App.tsx. */
   switchDocument: (open: () => void) => void;
 }
@@ -127,6 +129,15 @@ export function useCommands(deps: CommandDeps): Command[] {
       }
       // Offered during a live session too: undo sends the inverse of this
       // client's own edit through the server, so it converges like any batch.
+      // Practice, not playback: this changes what the app is doing with your
+      // playing, not with its own. Grouped on its own so it does not read as
+      // another transport control.
+      add({
+        id: "listen",
+        title: deps.listening.on ? "Stop listening" : "Listen and grade my playing",
+        section: "Practice",
+        run: deps.listening.toggle,
+      });
       add({ id: "undo", title: "Undo", section: "Edit", hint: "Cmd+Z", run: editor.undo });
       add({ id: "redo", title: "Redo", section: "Edit", hint: "Cmd+Shift+Z", run: editor.redo });
       for (const [label, d] of [["whole", 1], ["half", 2], ["quarter", 4], ["eighth", 8], ["sixteenth", 16]] as const) {
