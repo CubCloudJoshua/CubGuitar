@@ -19,9 +19,13 @@
  */
 import { beatTicks } from "./alphatex.js";
 import { DEFAULT_TIME_SIGNATURE } from "./build.js";
-import type { Bar, Id, Score, Track } from "./score.js";
+import type { Articulation, Bar, Id, Score, Track } from "./score.js";
 
-const QUARTER_TICKS = 960;
+/**
+ * Ticks per quarter note. Exported because a consumer writing a file format has
+ * to state its own division, and stating ours means no conversion at all.
+ */
+export const QUARTER_TICKS = 960;
 /** What a score means by "no tempo stated". Matches alphaTab's default. */
 export const DEFAULT_TEMPO_BPM = 120;
 
@@ -37,16 +41,49 @@ export interface TimedNote {
   pitch: number;
   startSeconds: number;
   durationSeconds: number;
+  /**
+   * The same position in ticks, at QUARTER_TICKS per quarter note.
+   *
+   * Both, because the two consumers want different things and converting between
+   * them is lossy in one direction. A view following playback wants seconds — it
+   * has a clock in seconds and no interest in tempo. A file format wants ticks:
+   * MIDI, MusicXML and Guitar Pro all store integer divisions against a tempo
+   * map, and deriving those back from seconds would reintroduce, as rounding
+   * error, exactly the tempo information the format is about to state anyway.
+   */
+  startTicks: number;
+  durationTicks: number;
   /** Set when the note is tied into by the next one, which sustains it. */
   tiedToNext?: boolean;
+  /** Carried through so an exporter can act on accents, mutes and bends. */
+  articulations: readonly Articulation[];
 }
 
 export interface Timeline {
   notes: TimedNote[];
   /** Total sounding length, including the last note's tail. */
   durationSeconds: number;
+  durationTicks: number;
   /** Bar boundaries in played order, for a cursor that has to name a bar. */
-  bars: Array<{ bar: number; startSeconds: number; endSeconds: number }>;
+  bars: Array<{
+    bar: number;
+    startSeconds: number;
+    endSeconds: number;
+    startTicks: number;
+    endTicks: number;
+  }>;
+  /**
+   * Tempo and meter as they occur in *played* order, which is what a conductor
+   * track is. A repeated section states its tempo again on the second pass,
+   * because a file format reader walking the track forward has no other way to
+   * know the tempo went back.
+   *
+   * Only entries that change anything are emitted, so a score with one tempo has
+   * one entry rather than one per bar.
+   */
+  tempoChanges: Array<{ tick: number; bpm: number }>;
+  meterChanges: Array<{ tick: number; beats: number; beatValue: number }>;
+  ticksPerQuarter: number;
 }
 
 /**
@@ -189,12 +226,22 @@ export function timeline(score: Score): Timeline {
 
   const notes: TimedNote[] = [];
   const bars: Timeline["bars"] = [];
+  const tempoChanges: Timeline["tempoChanges"] = [];
+  const meterChanges: Timeline["meterChanges"] = [];
   let seconds = 0;
+  let ticks = 0;
 
   for (const barIndex of order) {
     const bpm = tempos[barIndex] ?? DEFAULT_TEMPO_BPM;
     const secondsPerTick = 60 / bpm / QUARTER_TICKS;
     const start = seconds;
+    const startTicks = ticks;
+    const meter = meters[barIndex] ?? DEFAULT_TIME_SIGNATURE;
+    if (tempoChanges.at(-1)?.bpm !== bpm) tempoChanges.push({ tick: startTicks, bpm });
+    const lastMeter = meterChanges.at(-1);
+    if (lastMeter?.beats !== meter.beats || lastMeter?.beatValue !== meter.beatValue) {
+      meterChanges.push({ tick: startTicks, beats: meter.beats, beatValue: meter.beatValue });
+    }
 
     for (const [trackIndex, track] of score.tracks.entries()) {
       const bar = track.bars[barIndex];
@@ -213,7 +260,10 @@ export function timeline(score: Score): Timeline {
               pitch: note.pitch,
               startSeconds: start + tick * secondsPerTick,
               durationSeconds: length * secondsPerTick,
+              startTicks: startTicks + tick,
+              durationTicks: length,
               ...(note.tiedToNext ? { tiedToNext: true } : {}),
+              articulations: note.articulations,
             });
           }
           tick += length;
@@ -221,13 +271,13 @@ export function timeline(score: Score): Timeline {
       }
     }
 
-    const meter = meters[barIndex] ?? DEFAULT_TIME_SIGNATURE;
     const spineTicks = Math.max(
       0,
       ...score.tracks.map((t) => barTicks(t.bars[barIndex], meter)),
     );
     seconds = start + spineTicks * secondsPerTick;
-    bars.push({ bar: barIndex, startSeconds: start, endSeconds: seconds });
+    ticks = startTicks + spineTicks;
+    bars.push({ bar: barIndex, startSeconds: start, endSeconds: seconds, startTicks, endTicks: ticks });
   }
 
   return {
@@ -236,8 +286,90 @@ export function timeline(score: Score): Timeline {
     // written end only if the bar is short, and a reader that stopped at the
     // last bar line would cut it off.
     durationSeconds: Math.max(seconds, ...notes.map((n) => n.startSeconds + n.durationSeconds), 0),
+    durationTicks: Math.max(ticks, ...notes.map((n) => n.startTicks + n.durationTicks), 0),
     bars,
+    tempoChanges,
+    meterChanges,
+    ticksPerQuarter: QUARTER_TICKS,
   };
+}
+
+/**
+ * Tied notes joined into the single note they sound as.
+ *
+ * A tie means "do not play this again, hold the last one". The timeline reports
+ * what is *written* — two notes, because the document contains two — and anything
+ * that turns the timeline into sound or into a picture of sound has to join them,
+ * or you hear two notes where a player would hear one and see a second marker
+ * arrive for a note already ringing.
+ *
+ * Three consumers need this and none of them should own it: the MIDI writer (where
+ * a re-articulated tie is audibly wrong and was measured against alphaTab as 1,616
+ * extra note-ons in one file), the fretboard reader, and the playback engine in
+ * STANDALONE.md's Phase P.
+ *
+ * Matched on pitch rather than on string, because that is what a tie means
+ * musically and what every consumer of this cares about. A continuation must also
+ * start where the tied note ended: two separate notes of the same pitch later in
+ * the bar are two notes, not one long one.
+ */
+export function mergeTies(notes: readonly TimedNote[]): TimedNote[] {
+  const byVoice = new Map<string, TimedNote[]>();
+  for (const note of notes) {
+    const key = `${note.trackIndex}:${note.pitch}`;
+    const list = byVoice.get(key) ?? [];
+    list.push(note);
+    byVoice.set(key, list);
+  }
+
+  /** Notes absorbed into an earlier one, by identity. */
+  const absorbed = new Set<TimedNote>();
+  /** Extra length an earlier note gained, by identity. */
+  const extended = new Map<TimedNote, number>();
+
+  for (const list of byVoice.values()) {
+    list.sort((a, b) => a.startTicks - b.startTicks);
+    for (let i = 0; i < list.length; i += 1) {
+      const head = list[i]!;
+      if (!head.tiedToNext || absorbed.has(head)) continue;
+      // Walk the chain: a tie can run through several notes.
+      let end = head.startTicks + head.durationTicks;
+      let total = head.durationTicks;
+      for (let j = i + 1; j < list.length; j += 1) {
+        const next = list[j]!;
+        if (absorbed.has(next)) continue;
+        // A tick of slack: durations are rounded to integer ticks, so a
+        // continuation can land a tick either side of where the tie ended.
+        if (Math.abs(next.startTicks - end) > 1) break;
+        absorbed.add(next);
+        total += next.durationTicks;
+        end = next.startTicks + next.durationTicks;
+        if (!next.tiedToNext) break;
+      }
+      if (total !== head.durationTicks) extended.set(head, total);
+    }
+  }
+
+  const out: TimedNote[] = [];
+  for (const note of notes) {
+    if (absorbed.has(note)) continue;
+    const total = extended.get(note);
+    if (total === undefined) {
+      out.push(note);
+      continue;
+    }
+    // Seconds have to grow with ticks, and the ratio is the note's own tempo —
+    // which is exactly durationSeconds / durationTicks, whatever the tempo was.
+    const secondsPerTick = note.durationTicks > 0 ? note.durationSeconds / note.durationTicks : 0;
+    out.push({
+      ...note,
+      durationTicks: total,
+      durationSeconds: total * secondsPerTick,
+      // The join is complete: nothing after it is still waiting to be tied in.
+      tiedToNext: false,
+    });
+  }
+  return out;
 }
 
 /** Which played bar a moment falls in, or null past the end. */

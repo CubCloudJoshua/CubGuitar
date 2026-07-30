@@ -75,7 +75,9 @@ export function useCommands(deps: CommandDeps): Command[] {
 
     if (c.score) {
       add({ id: "export-gp", title: "Export Guitar Pro (.gp)", section: "Export", run: () => { const s = c.getScore(); if (s) exportGp(s); } });
-      add({ id: "export-midi", title: "Export MIDI", section: "Export", run: () => { const api = c.getApi(); if (api) exportMidi(api); } });
+      // Ours from the semantic model while the editor owns the document;
+      // alphaTab's reading of the original bytes otherwise.
+      add({ id: "export-midi", title: "Export MIDI", section: "Export", run: () => { if (editing) exportMidi(editor.score); else c.getApi()?.downloadMidi(); } });
       add({ id: "export-tex", title: "Export alphaTex", section: "Export", run: () => { const s = c.getScore(); if (s) exportTex(s); } });
       add({ id: "export-pdf", title: "Print / PDF", section: "Export", run: () => { const api = c.getApi(); if (api) printPdf(api); } });
     }

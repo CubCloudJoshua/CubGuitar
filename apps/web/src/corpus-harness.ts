@@ -20,7 +20,7 @@ import {
   type Score,
   timeline,
 } from "@cubscore/core";
-import { fromAlphaTab } from "@cubscore/formats";
+import { fromAlphaTab, parseMidi, toMidi } from "@cubscore/formats";
 
 export interface LoadResult {
   ok: boolean;
@@ -88,6 +88,8 @@ declare global {
       renderAudioBytes(bytes: number[], maxMs: number): Promise<AudioResult>;
       timingTex(tex: string): Promise<TimingResult>;
       timingBytes(bytes: number[]): Promise<TimingResult>;
+      midiTex(tex: string): Promise<MidiCompareResult>;
+      midiBytes(bytes: number[]): Promise<MidiCompareResult>;
     };
   }
 }
@@ -111,6 +113,29 @@ export interface TimingResult {
   writtenBars?: number;
   playedBars?: number;
   tempo?: number;
+}
+
+/**
+ * Our MIDI export against alphaTab's, for the same score.
+ *
+ * The unit tests grade our writer against our own reader, which proves the pair
+ * agrees and cannot catch a mistake both halves make. alphaTab writes MIDI too, so
+ * this reads *its* file with *our* parser and compares — which grades the writer
+ * against an independent implementation and the parser against an independent
+ * writer at the same time. Both directions in one measurement.
+ */
+export interface MidiCompareResult {
+  ok: boolean;
+  error?: string;
+  /** Note counts, and pitch multisets so a wrong tuning shows up when counts match. */
+  ours?: { notes: number; ticksPerQuarter: number; lastTick: number; pitches: number[] };
+  theirs?: { notes: number; ticksPerQuarter: number; lastTick: number; pitches: number[] };
+  /** Notes we wrote that alphaTab did not, and the reverse, as pitch counts. */
+  missing?: string[];
+  extra?: string[];
+  /** How many of alphaTab's notes were on the percussion channel we do not carry. */
+  percussionDropped?: number;
+  unsupported?: string[];
 }
 
 const host = document.getElementById("host");
@@ -458,8 +483,84 @@ async function timing(trigger: () => void): Promise<TimingResult> {
   }
 }
 
+/**
+ * A comparable summary of one file's note content.
+ *
+ * Positions are in forty-eighths of a quarter note, so two files with different
+ * divisions compare directly. The note list is passed in rather than taken from
+ * the parse, because the comparison is over *pitched* content: percussion is
+ * dropped by our importer on purpose, and a length taken from the whole file while
+ * the count came from the pitched notes is the two halves of one comparison
+ * disagreeing about what is being compared — which is how a percussion-only file
+ * came out as "0 notes off, 8 quarters short".
+ */
+function summarise(parsed: ReturnType<typeof parseMidi>, notes: ReturnType<typeof parseMidi>["notes"]) {
+  const toFortyEighths = (tick: number) => Math.round((tick / parsed.ticksPerQuarter) * 48);
+  return {
+    notes: notes.length,
+    ticksPerQuarter: parsed.ticksPerQuarter,
+    lastTick: toFortyEighths(notes.reduce((max, n) => Math.max(max, n.startTicks + n.durationTicks), 0)),
+    pitches: notes.map((n) => n.key).sort((a, b) => a - b),
+  };
+}
+
+/** Multiset difference, reported as "pitch xN", so a near-miss is readable. */
+function pitchDiff(a: number[], b: number[]): string[] {
+  const counts = new Map<number, number>();
+  for (const p of a) counts.set(p, (counts.get(p) ?? 0) + 1);
+  for (const p of b) counts.set(p, (counts.get(p) ?? 0) - 1);
+  return [...counts.entries()]
+    .filter(([, n]) => n > 0)
+    .sort(([x], [y]) => x - y)
+    .map(([pitch, n]) => `${pitch}x${n}`);
+}
+
+async function compareMidi(trigger: () => void): Promise<MidiCompareResult> {
+  const loaded = await run(trigger);
+  if (!loaded.ok) return { ok: false, error: loaded.error ?? "score failed to load" };
+  const source = api.score;
+  if (!source) return { ok: false, error: "no score after load" };
+
+  // alphaTab's own MIDI for this score, written to bytes the same way its export
+  // does. SMF1 mode, because that is what a file on disk has to be.
+  const theirFile = new alphaTab.midi.MidiFile();
+  theirFile.format = alphaTab.midi.MidiFileFormat.MultiTrack;
+  const handler = new alphaTab.midi.AlphaSynthMidiFileHandler(theirFile, true);
+  const generator = new alphaTab.midi.MidiFileGenerator(source, api.settings, handler);
+  generator.generate();
+  const theirBytes = theirFile.toBinary();
+
+  const core = fromAlphaTab(source).score;
+  const mine = toMidi(core);
+
+  try {
+    const oursParsed = parseMidi(mine.bytes);
+    const theirsParsed = parseMidi(theirBytes);
+    // Percussion is dropped by our importer on purpose, and the import report
+    // already says so on every file that has a drum track. Comparing their
+    // channel-10 notes against our absent ones would report the same known gap a
+    // second time, as MIDI drift, and would hide real drift behind it. So the
+    // comparison is of pitched content, and the percussion is counted separately.
+    const theirPitched = theirsParsed.notes.filter((n) => n.channel !== 9);
+    const percussionDropped = theirsParsed.notes.length - theirPitched.length;
+    return {
+      ok: true,
+      ours: summarise(oursParsed, oursParsed.notes),
+      theirs: summarise(theirsParsed, theirPitched),
+      percussionDropped,
+      missing: pitchDiff(theirPitched.map((n) => n.key), oursParsed.notes.map((n) => n.key)),
+      extra: pitchDiff(oursParsed.notes.map((n) => n.key), theirPitched.map((n) => n.key)),
+      unsupported: mine.report.unsupported,
+    };
+  } catch (e) {
+    return { ok: false, error: `parse failed: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
 window.cubscore = {
   loadTex: (tex) => run(() => api.tex(tex)),
+  midiTex: (tex) => compareMidi(() => api.tex(tex)),
+  midiBytes: (bytes) => compareMidi(() => api.load(new Uint8Array(bytes))),
   timingTex: (tex) => timing(() => api.tex(tex)),
   timingBytes: (bytes) => timing(() => api.load(new Uint8Array(bytes))),
   renderAudioTex: (tex, maxMs) => renderAudio(() => api.tex(tex), maxMs),

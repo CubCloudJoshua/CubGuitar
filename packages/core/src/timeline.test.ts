@@ -6,8 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { applyBatch } from "./apply.js";
-import { createNote, createScore, duration } from "./build.js";
-import { barAtSeconds, notesInWindow, playOrder, timeline } from "./timeline.js";
+import { createNote, createScore, createTrack, duration, frettedGuitar } from "./build.js";
+import { barAtSeconds, mergeTies, notesInWindow, playOrder, timeline } from "./timeline.js";
 import type { Bar, Score } from "./score.js";
 import type { Op, OpBatch, OpKind } from "./ops.js";
 
@@ -322,5 +322,123 @@ describe("bar length", () => {
     );
     // Five quarters written in a 4/4 bar: the fifth is not silently dropped.
     expect(timeline(stuffed).bars[0]?.endSeconds).toBeCloseTo(2.5, 6);
+  });
+});
+
+describe("mergeTies", () => {
+  /** Two quarter notes on the same pitch, the first tied into the second. */
+  function tied(): Score {
+    const score = createScore("Ties");
+    const beats = ids(score).voice.beats;
+    const first = createNote(64, 1, 0);
+    const second = createNote(64, 1, 0);
+    const withNotes = applyBatch(
+      score,
+      batch(
+        { type: "note.insert", beatId: beats[0]!.id, note: { ...first, tiedToNext: true } },
+        { type: "note.insert", beatId: beats[1]!.id, note: second },
+      ),
+    );
+    return withNotes;
+  }
+
+  it("joins a tied pair into one note of the combined length", () => {
+    const line = timeline(tied());
+    expect(line.notes).toHaveLength(2);
+    const merged = mergeTies(line.notes);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.durationTicks).toBe(line.notes[0]!.durationTicks * 2);
+    expect(merged[0]?.durationSeconds).toBeCloseTo(1, 6);
+    expect(merged[0]?.startTicks).toBe(0);
+    // The join is complete, so nothing is still waiting to be tied in.
+    expect(merged[0]?.tiedToNext).toBe(false);
+  });
+
+  it("follows a tie through several notes", () => {
+    const score = createScore("Long tie");
+    const beats = ids(score).voice.beats;
+    const chain = applyBatch(
+      score,
+      batch(
+        { type: "note.insert", beatId: beats[0]!.id, note: { ...createNote(64, 1, 0), tiedToNext: true } },
+        { type: "note.insert", beatId: beats[1]!.id, note: { ...createNote(64, 1, 0), tiedToNext: true } },
+        { type: "note.insert", beatId: beats[2]!.id, note: createNote(64, 1, 0) },
+      ),
+    );
+    const merged = mergeTies(timeline(chain).notes);
+    expect(merged).toHaveLength(1);
+    expect(merged[0]?.durationSeconds).toBeCloseTo(1.5, 6);
+  });
+
+  it("leaves two separate notes of the same pitch alone", () => {
+    // Beats 1 and 4 of the bar, same pitch, no tie. Merging these would silence a
+    // note the document contains.
+    const score = createScore("Same pitch");
+    const beats = ids(score).voice.beats;
+    const apart = applyBatch(
+      score,
+      batch(
+        { type: "note.insert", beatId: beats[0]!.id, note: createNote(64, 1, 0) },
+        { type: "note.insert", beatId: beats[3]!.id, note: createNote(64, 1, 0) },
+      ),
+    );
+    expect(mergeTies(timeline(apart).notes)).toHaveLength(2);
+  });
+
+  it("does not join a tie to a note that is not adjacent to it", () => {
+    // A tie flag with no continuation where the note ends: a malformed document,
+    // reachable from an import, and it must not swallow a later note.
+    const score = createScore("Orphan tie");
+    const beats = ids(score).voice.beats;
+    const orphan = applyBatch(
+      score,
+      batch(
+        { type: "note.insert", beatId: beats[0]!.id, note: { ...createNote(64, 1, 0), tiedToNext: true } },
+        { type: "note.insert", beatId: beats[2]!.id, note: createNote(64, 1, 0) },
+      ),
+    );
+    const merged = mergeTies(timeline(orphan).notes);
+    expect(merged).toHaveLength(2);
+    expect(merged[0]?.durationSeconds).toBeCloseTo(0.5, 6);
+  });
+
+  it("does not join across a pitch change", () => {
+    const score = createScore("Pitch change");
+    const beats = ids(score).voice.beats;
+    const different = applyBatch(
+      score,
+      batch(
+        { type: "note.insert", beatId: beats[0]!.id, note: { ...createNote(64, 1, 0), tiedToNext: true } },
+        { type: "note.insert", beatId: beats[1]!.id, note: createNote(67, 1, 3) },
+      ),
+    );
+    expect(mergeTies(timeline(different).notes)).toHaveLength(2);
+  });
+
+  it("does not join across tracks", () => {
+    const score = applyBatch(
+      createScore("Two parts"),
+      batch({ type: "track.insert", index: 1, track: createTrack("Second", frettedGuitar(), 4) }),
+    );
+    const a = score.tracks[0]!.bars[0]!.voices[0]!.beats[0]!;
+    const b = score.tracks[1]!.bars[0]!.voices[0]!.beats[1]!;
+    const both = applyBatch(
+      score,
+      batch(
+        { type: "note.insert", beatId: a.id, note: { ...createNote(64, 1, 0), tiedToNext: true } },
+        { type: "note.insert", beatId: b.id, note: createNote(64, 1, 0) },
+      ),
+    );
+    expect(mergeTies(timeline(both).notes)).toHaveLength(2);
+  });
+
+  it("returns untied notes untouched, by reference", () => {
+    const line = timeline(withNote(base(), 0, 0, 5));
+    const merged = mergeTies(line.notes);
+    expect(merged[0]).toBe(line.notes[0]);
+  });
+
+  it("handles an empty list", () => {
+    expect(mergeTies([])).toEqual([]);
   });
 });

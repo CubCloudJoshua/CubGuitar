@@ -22,7 +22,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { color, font, typeScale } from "@cubscore/design";
-import { stringCount, type TimedNote, type Timeline, type Track } from "@cubscore/core";
+import { mergeTies, stringCount, type TimedNote, type Timeline, type Track } from "@cubscore/core";
 
 /**
  * The projection. Two vectors, one per axis of the neck, applied to (fret, string).
@@ -183,13 +183,19 @@ export function IsoView({ timeline: line, seconds, track, trackIndex, width, hei
   const g = useMemo(() => geometry(width, height, strings), [width, height, strings]);
   const markerR = markerRadius(g.gap);
 
+  // Ties joined before anything is placed. A tie means hold the note, not play it
+  // again, so the second half of a tied pair must not send a second marker at you
+  // for a string that is already ringing.
+  const sounding = useMemo(() => mergeTies(line.notes.filter((n) => n.trackIndex === trackIndex)), [
+    line,
+    trackIndex,
+  ]);
+
   const visible = useMemo(() => {
     const from = seconds - LOOKBEHIND_SECONDS;
     const to = seconds + LOOKAHEAD_SECONDS;
-    return line.notes.filter(
-      (n) => n.trackIndex === trackIndex && n.startSeconds >= from && n.startSeconds <= to,
-    );
-  }, [line, seconds, trackIndex]);
+    return sounding.filter((n) => n.startSeconds >= from && n.startSeconds <= to);
+  }, [sounding, seconds]);
 
   // Fret lines every second of lookahead, and a heavier one on each bar line, so
   // the neck has a rhythm to it rather than being a bare grid.

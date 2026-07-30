@@ -2,8 +2,21 @@ import { useEffect, useRef, useState } from "react";
 import { Button, color, font, typeScale } from "@cubscore/design";
 import { exportGp, exportMidi, exportTex, printPdf } from "../export";
 import type { AlphaTabController } from "../useAlphaTab";
+import type { Score as CoreScore } from "@cubscore/core";
 
-export function ExportMenu({ c }: { c: AlphaTabController }) {
+export function ExportMenu({
+  c,
+  score,
+}: {
+  c: AlphaTabController;
+  /**
+   * The semantic document, for the formats we write ourselves. Only present when
+   * the editor owns it: an imported file opened in the player is shown from its
+   * original bytes, and MIDI for that still has to come from alphaTab's reading
+   * of them.
+   */
+  score?: CoreScore;
+}) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
 
@@ -24,7 +37,8 @@ export function ExportMenu({ c }: { c: AlphaTabController }) {
   const items: Array<[string, () => void]> = [
     ["Guitar Pro (.gp)", () => { const s = c.getScore(); if (s) exportGp(s); }],
     ["alphaTex (.altex)", () => { const s = c.getScore(); if (s) exportTex(s); }],
-    ["MIDI (.mid)", () => { const api = c.getApi(); if (api) exportMidi(api); }],
+    // Ours when the editor owns the document; alphaTab's otherwise.
+    ["MIDI (.mid)", () => { if (score) exportMidi(score); else c.getApi()?.downloadMidi(); }],
     ["Print / PDF", () => { const api = c.getApi(); if (api) printPdf(api); }],
   ];
 

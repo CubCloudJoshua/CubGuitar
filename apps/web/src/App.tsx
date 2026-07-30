@@ -330,7 +330,10 @@ export function App() {
         {!shared.active && (
           <Button variant="outline" onClick={() => fileInputRef.current?.click()}>OPEN</Button>
         )}
-        <ExportMenu c={c} />
+        {/* The semantic document is handed over only while the editor owns it:
+            MIDI is written from our model, and for an imported file opened in the
+            player there is no model, only the original bytes. */}
+        <ExportMenu c={c} {...(editing ? { score: editor.score } : {})} />
         {!shared.active && (
           <Button variant="outline" active={auth.user !== null} onClick={() => setAccountOpen((v) => !v)}>
             {auth.user ? auth.user.email.split("@")[0]?.toUpperCase() ?? "ACCOUNT" : "SIGN IN"}

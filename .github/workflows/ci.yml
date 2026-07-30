@@ -52,6 +52,15 @@ jobs:
       - name: Timeline agrees with playback
         run: pnpm timing
 
+      # Our MIDI export against alphaTab's, for every score. The unit tests grade
+      # our writer against our own reader, which cannot catch a mistake both halves
+      # make; this reads alphaTab's file with our parser, so the writer is graded
+      # against an independent implementation and the parser against an independent
+      # writer at once. It is what found ties being re-articulated as second
+      # note-ons — 1,616 extra note events in one nine-minute file.
+      - name: MIDI export agrees with alphaTab
+        run: pnpm midi
+
       # Drives the built app in a real browser across twelve journeys, standing
       # up the API and sync services against a throwaway data directory.
       - name: End-to-end suites

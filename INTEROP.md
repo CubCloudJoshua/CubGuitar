@@ -23,7 +23,7 @@ below inherits that contract.
 Two different things share the name. Both are worth having and they are unrelated
 pieces of work.
 
-### 1.1 MIDI files, out — do this first
+### 1.1 MIDI files, out — **shipped**
 
 Standard MIDI File export, from `timeline()`. It is the cheapest capability on this
 list: the timeline already holds every note with a start, a duration, a pitch and a
@@ -44,6 +44,15 @@ Why it matters commercially: a MIDI export is how a part someone wrote in CubSco
 gets into their DAW, and "does it work with my DAW" is the first question a working
 musician asks. It is also how a CubScore file becomes usable by someone who does
 not have CubScore, which makes sharing a link less of a dead end.
+
+**What building it taught.** Grading our file against alphaTab's, score by score,
+found a bug the unit tests could not: ties were being written as a second note-on,
+so a tied pair sounded as two notes instead of one held one — 1,616 extra note
+events in a nine-minute file. Joining ties is now `mergeTies()` in core rather than
+in the exporter, because the fretboard reader had the same bug (a second marker
+arriving for a string already ringing) and the playback engine in Phase P will have
+it too. That is the shape to look for: a correction that belongs to the model, not
+to the format that exposed it.
 
 ### 1.2 MIDI files, in
 
@@ -235,8 +244,9 @@ and convergence tests — the discipline is established and the cost is predicta
 
 Value per unit of risk, same as STANDALONE.md.
 
-1. **MIDI file export.** Days. Free from `timeline()`, immediately useful, proves
-   the timeline against a second consumer.
+1. ~~**MIDI file export.**~~ Shipped. Free from `timeline()` as predicted, and it
+   proved the timeline against a second consumer — which is how the tie bug
+   surfaced.
 2. **ASCII tab export.** Days. The format most people actually swap.
 3. **MusicXML import.** Weeks. Carries tablature natively, so it is the highest
    fidelity import available and needs no fingering inference.

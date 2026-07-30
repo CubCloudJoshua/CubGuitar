@@ -8,6 +8,7 @@
  * toward the strike line as the clock advances. A view that merely looked like a
  * fretboard would pass none of them.
  */
+import { readFile } from "node:fs/promises";
 import { appReady, newDevice, scoreText } from "../harness.mjs";
 
 export const name = "fretboard";
@@ -189,6 +190,43 @@ export async function run({ browser, baseUrl, recorder }) {
   recorder.check(
     "the engraved score is still there, not reloading",
     (await scoreText(page)).includes("12"),
+  );
+
+  // MIDI export, which shares the fretboard reader's substrate: both read
+  // `timeline()`, so a file that comes out of here is the same performance the
+  // reader just drew. Checked as bytes rather than as a click, because "a
+  // download happened" is not the same claim as "a valid MIDI file happened".
+  const download = await Promise.all([
+    page.waitForEvent("download", { timeout: 20_000 }),
+    (async () => {
+      await page.getByRole("button", { name: "EXPORT" }).click();
+      await page.waitForTimeout(400);
+      await page.getByText("MIDI (.mid)", { exact: true }).click();
+    })(),
+  ]).then(([d]) => d);
+
+  recorder.check("the exported file is named after the score", /\.mid$/.test(download.suggestedFilename()), download.suggestedFilename());
+  const midiPath = await download.path();
+  const bytes = midiPath ? Array.from(await readFile(midiPath)) : [];
+  const ascii = (from, len) => bytes.slice(from, from + len).map((b) => String.fromCharCode(b)).join("");
+  recorder.check("it starts with a MIDI header chunk", ascii(0, 4) === "MThd", ascii(0, 4));
+  recorder.check(
+    "declaring Type 1 and our own division",
+    // Bytes 8-9 are the format, 12-13 the ticks per quarter note.
+    bytes[8] === 0 && bytes[9] === 1 && (bytes[12] << 8 | bytes[13]) === 960,
+    `format ${bytes[9]}, division ${(bytes[12] << 8) | bytes[13]}`,
+  );
+  const trackChunks = bytes.reduce(
+    (n, _, i) => (ascii(i, 4) === "MTrk" ? n + 1 : n),
+    0,
+  );
+  recorder.check("with a conductor track and a part track", trackChunks === 2, `${trackChunks} MTrk chunks`);
+  // Fret 12 on string 3 is pitch 67. A writer that sent the fret instead of the
+  // pitch would put 12 here, which is a note below the bottom of a piano.
+  recorder.check(
+    "and note-on events carrying pitches, not fret numbers",
+    bytes.some((b, i) => (b & 0xf0) === 0x90 && b < 0xa0 && bytes[i + 1] === 67 && (bytes[i + 2] ?? 0) > 0),
+    `bytes ${bytes.length}`,
   );
 
   // It resizes with the window rather than scaling a fixed viewBox, because a
