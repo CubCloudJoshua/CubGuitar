@@ -10,6 +10,7 @@ import { useAuth } from "./auth/useAuth";
 import { collabIdFromLocation, useCollab } from "./collab/useCollab";
 import { PeerCarets, PeerRoster } from "./collab/PeerCarets";
 import { caretEntry, caretsVisible, JoinReveal, useJoinReveal } from "./collab/JoinReveal";
+import { useSharedTransport } from "./collab/useSharedTransport";
 import { IsoPanel } from "./iso/IsoView";
 import { frettedGuitar, timeline as buildTimeline } from "@cubscore/core";
 import { EditorBar } from "./editor/EditorBar";
@@ -43,6 +44,26 @@ export function App() {
   // The join sequence: the score materializes system by system, then the peer
   // carets fade in (UI-DESIGN.md, signature moment 3).
   const revealPhase = useJoinReveal(collab.joinCount, c.systemBoxes.length);
+
+  /**
+   * One playhead for the room (collab/useSharedTransport). Wraps the transport so a
+   * local play, pause, stop or seek tells the session, and applies the room's.
+   */
+  const transport = useSharedTransport({
+    target: {
+      playing: c.playing,
+      playPause: c.playPause,
+      stop: c.stop,
+      seekTo: c.seekTo,
+      positionSeconds: c.positionSeconds,
+    },
+    live: collab.status === "live",
+    send: collab.sendTransport,
+  });
+  useEffect(() => {
+    collab.setTransportListener(transport.apply);
+    return () => collab.setTransportListener(null);
+  }, [collab, transport.apply]);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -90,8 +111,11 @@ export function App() {
     setMode("edit");
   }, [join, setMode]);
 
-  // Space toggles playback; Cmd/Ctrl+L the library; Cmd/Ctrl+K the palette.
-  const { playPause } = c;
+  // Space toggles playback; Cmd/Ctrl+L the library; Cmd/Ctrl+K the palette. The
+  // space bar goes through the session's transport like every other play control:
+  // it is the one most people actually use, so routing only the buttons would make
+  // the room follow a click and ignore a keystroke.
+  const playPause = transport.playPause;
   useEffect(() => {
     const onKey = (ev: KeyboardEvent) => {
       if ((ev.metaKey || ev.ctrlKey) && ev.key.toLowerCase() === "k") {
@@ -165,6 +189,7 @@ export function App() {
     editor,
     lib,
     collab,
+    transport,
     sharedView: shared.active,
     editing,
     canShare,
@@ -405,6 +430,24 @@ export function App() {
               anyone who cannot see a caret in a staff. */}
           <span style={{ color: color.textDim }}>{collab.peers.length} in session</span>
           <PeerRoster cursors={collab.cursors} />
+          {/* One playhead for the room. On by default, because reading the same
+              chart together is the point of being in a session; off is for someone
+              working on their own part in the middle of a rehearsal. */}
+          <Button
+            variant="outline"
+            active={transport.following}
+            onClick={() => transport.setFollowing(!transport.following)}
+            title={
+              transport.following
+                ? "Following the session's playhead. Turn off to scrub on your own."
+                : "Scrubbing on your own. Turn on to follow the session's playhead."
+            }
+          >
+            {transport.following ? "FOLLOWING" : "FOLLOW"}
+          </Button>
+          {transport.driver !== null && transport.following && (
+            <span style={{ color: color.textDim }}>· {transport.driver} is driving</span>
+          )}
         </div>
       )}
       {collab.error && !performing && <ErrorBanner message={collab.error} />}
@@ -529,8 +572,8 @@ export function App() {
             playing={c.playing}
             currentSeconds={c.position.currentTime / 1000}
             remainingSeconds={Math.max(0, (c.position.endTime - c.position.currentTime) / 1000)}
-            onPlayPause={c.playPause}
-            onStop={c.stop}
+            onPlayPause={transport.playPause}
+            onStop={transport.stop}
             onExit={() => setPerforming(false)}
           />
           {!c.playing && lib.entries.length > 0 && (
@@ -574,7 +617,14 @@ export function App() {
       )}
 
       {/* The stage has its own, much larger transport. */}
-      {!performing && <TransportPill c={c} />}
+      {/* Transport routed through the session when one is live, so pressing play
+          here moves the whole room's playhead. */}
+      {!performing && (
+        <TransportPill
+          c={c}
+          transport={{ playPause: transport.playPause, stop: transport.stop, seekTo: transport.seekTo }}
+        />
+      )}
       {/* Mounted fresh on each open: guarantees an empty query and focused
           input regardless of how the previous invocation ended. */}
       {paletteOpen && (

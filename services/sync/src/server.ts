@@ -49,6 +49,25 @@ interface Member {
   cursor: { bar: number; beat: number } | null;
 }
 
+/**
+ * Shape check on an untrusted transport message.
+ *
+ * A shared transport is the one message type that moves everybody's playhead, so a
+ * malformed one is not merely ignored noise — a NaN position would seek every
+ * member of the room to nowhere.
+ */
+function isTransport(value: unknown): value is { action: string; seconds: number } {
+  if (typeof value !== "object" || value === null) return false;
+  const t = value as { action?: unknown; seconds?: unknown };
+  return (
+    typeof t.action === "string" &&
+    ["play", "pause", "stop", "seek", "sync"].includes(t.action) &&
+    typeof t.seconds === "number" &&
+    Number.isFinite(t.seconds) &&
+    t.seconds >= 0
+  );
+}
+
 /** Shape check on an untrusted cursor before it is retained or forwarded. */
 function isCursor(value: unknown): value is { bar: number; beat: number } {
   if (typeof value !== "object" || value === null) return false;
@@ -166,7 +185,13 @@ server.on("connection", (socket, request) => {
   broadcast(room, socket, { type: "peers", peers: peerList(room) });
 
   socket.on("message", (raw) => {
-    let message: { type?: string; score?: unknown; batch?: unknown; cursor?: unknown };
+    let message: {
+      type?: string;
+      score?: unknown;
+      batch?: unknown;
+      cursor?: unknown;
+      transport?: unknown;
+    };
     try {
       message = JSON.parse(String(raw)) as typeof message;
     } catch {
@@ -216,6 +241,20 @@ server.on("connection", (socket, request) => {
           batch: message.batch,
           from: member.id,
           seq: room.batches.length,
+        });
+        break;
+      }
+
+      case "transport": {
+        // Relayed, not retained. A transport action is an event about *now*, and a
+        // joiner who replayed a stored one would be dragged to wherever the room was
+        // when they arrived — which is the opposite of the point of joining.
+        if (!isTransport(message.transport)) break;
+        broadcast(room, socket, {
+          type: "transport",
+          from: member.id,
+          name: member.name,
+          transport: message.transport,
         });
         break;
       }

@@ -24,7 +24,7 @@ What follows is ordered by **differentiation per unit of work**, not by ambition
 
 ---
 
-## 1. Shared transport: collaborative *rehearsal*, not collaborative editing
+## 1. Shared transport: collaborative *rehearsal*, not collaborative editing — **shipped**
 
 **Nobody has this.** Collaboration in music software means editing a document
 together. Nobody locks a band's playheads together.
@@ -47,10 +47,23 @@ buys five seats of, and it is the feature a worship team or a school ensemble
 recognises instantly in a demo. It also makes Perform mode — already built, already
 foot-pedal driven — the mode a group uses rather than a soloist.
 
-**Risks worth naming.** Latency tolerance is the whole question: a playhead 200ms
-out of sync is worse than no sync, so the leader's clock has to be the authority and
-followers have to interpolate rather than jump. That is a solved problem in other
-domains and an honest engineering risk here.
+**What it took.** A `transport` message on the sync server (relayed, never
+retained — a joiner replaying a stored transport action would be dragged to wherever
+the room was when they arrived), an absolute `seekTo` on the player, and one hook
+owning follow state, the loop guard and drift correction.
+
+The latency question resolved smaller than expected, because the requirement is
+that five people read the same bar rather than that five speakers are phase-aligned.
+Actions carry an absolute position rather than a delta, so a dropped message costs
+one action instead of desynchronising the room permanently; the driver restates its
+position every two seconds and a follower corrects only past a third of a second of
+drift. Correcting continuously would make every follower's playhead stutter;
+correcting never would let them walk apart over a four-minute song.
+
+The loop guard is the part that is easy to miss: applying a remote action calls the
+same player methods a user does, and the player cannot tell them apart — so without
+a flag, a follower's play is rebroadcast as its own action, the driver follows that,
+and the room rings.
 
 ---
 

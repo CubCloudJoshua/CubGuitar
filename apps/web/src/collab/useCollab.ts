@@ -11,6 +11,12 @@ import type { EditorController } from "../editor/useEditor";
 
 export type CollabStatus = "off" | "connecting" | "live" | "error";
 
+/** One playhead for the room; see useSharedTransport for what it is and is not. */
+export interface TransportRelay {
+  action: "play" | "pause" | "stop" | "seek" | "sync";
+  seconds: number;
+}
+
 export interface Peer {
   id: string;
   name: string;
@@ -23,7 +29,7 @@ export interface PeerCursor {
 }
 
 interface ServerMessage {
-  type: "state" | "batch" | "peers" | "cursor" | "full";
+  type: "state" | "batch" | "peers" | "cursor" | "full" | "transport";
   reason?: string;
   you?: string;
   snapshot?: unknown;
@@ -33,6 +39,7 @@ interface ServerMessage {
   from?: string;
   name?: string;
   cursor?: { bar: number; beat: number };
+  transport?: { action: string; seconds: number };
   /** Everyone else's caret at the moment of joining, see the sync server. */
   cursors?: Array<{ from: string; name: string; cursor: { bar: number; beat: number } }>;
 }
@@ -75,6 +82,28 @@ export function useCollab(editor: EditorController, displayName: string) {
    * dropped and remade their socket, which was enough to delete a room they
    * were briefly alone in and lose its snapshot for good.
    */
+  /**
+   * Where incoming transport messages go. A ref rather than state because the
+   * socket handler is bound once, and a listener captured in its closure would go
+   * stale the first time the component re-rendered.
+   */
+  const transportListenerRef = useRef<((from: string, name: string, message: TransportRelay) => void) | null>(
+    null,
+  );
+  const setTransportListener = useCallback(
+    (listener: ((from: string, name: string, message: TransportRelay) => void) | null) => {
+      transportListenerRef.current = listener;
+    },
+    [],
+  );
+
+  const sendTransport = useCallback((message: TransportRelay) => {
+    const socket = socketRef.current;
+    if (socket?.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "transport", transport: message }));
+    }
+  }, []);
+
   const scoreRef = useRef(editor.score);
   scoreRef.current = editor.score;
   const nameRef = useRef(displayName);
@@ -165,6 +194,11 @@ export function useCollab(editor: EditorController, displayName: string) {
           case "peers":
             if (message.peers) setPeers(message.peers);
             break;
+          case "transport":
+            if (message.from && message.transport) {
+              transportListenerRef.current?.(message.from, message.name ?? "guest", message.transport as TransportRelay);
+            }
+            break;
           case "cursor":
             if (message.from && message.cursor) {
               const { from, name, cursor } = message;
@@ -242,7 +276,19 @@ export function useCollab(editor: EditorController, displayName: string) {
 
   useEffect(() => () => socketRef.current?.close(), []);
 
-  return { status, url, peers, cursors, error, joinCount, start, join, stop };
+  return {
+    status,
+    url,
+    peers,
+    cursors,
+    error,
+    joinCount,
+    start,
+    join,
+    stop,
+    sendTransport,
+    setTransportListener,
+  };
 }
 
 export type CollabController = ReturnType<typeof useCollab>;

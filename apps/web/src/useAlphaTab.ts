@@ -285,6 +285,30 @@ export function useAlphaTab() {
     api.timePosition = Math.max(0, Math.min(1, fraction)) * (end - 1);
   }, []);
 
+  /**
+   * Absolute seek, in seconds.
+   *
+   * Separate from `seekSeconds`, which is a nudge. A shared transport needs to put
+   * a follower's playhead at a stated position rather than move it by an amount:
+   * "go to 41.2 seconds" survives a dropped message, "skip forward five" does not.
+   */
+  const seekTo = useCallback((seconds: number) => {
+    const api = apiRef.current;
+    if (!api) return;
+    const end = endTimeRef.current;
+    const ms = Math.max(0, seconds * 1000);
+    api.timePosition = end > 0 ? Math.min(ms, end - 1) : ms;
+  }, []);
+
+  /**
+   * The playhead now, in seconds, without waiting for a render.
+   *
+   * The `position` state is a render away from the truth, and a drift check that
+   * compares a stale local position against a fresh remote one measures the render
+   * loop rather than the drift.
+   */
+  const positionSeconds = useCallback(() => (apiRef.current?.timePosition ?? 0) / 1000, []);
+
   /** Nudges playback, for the coarse seeking a player wants mid-song. */
   const seekSeconds = useCallback((delta: number) => {
     const api = apiRef.current;
@@ -388,6 +412,8 @@ export function useAlphaTab() {
     setStageEngraving,
     seekSeconds,
     seekFraction,
+    seekTo,
+    positionSeconds,
     setRamp,
     setTrackMuted,
     setTrackSolo,

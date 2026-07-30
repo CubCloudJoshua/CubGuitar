@@ -347,6 +347,92 @@ export async function run({ browser, baseUrl, recorder }) {
   await still.page.close();
   await host.page.waitForTimeout(1200);
 
+  // One playhead for the room (collab/useSharedTransport). This is the thing no
+  // other tablature product does: collaboration everywhere else means editing a
+  // document together, not reading one together.
+  //
+  // Measured as positions, not as button states. "Both say playing" would pass for
+  // two clients playing different parts of the song, which is the failure that
+  // matters when five people are meant to be reading the same bar.
+  const seconds = (page) =>
+    page.evaluate(() => {
+      const text = document.body.innerText.match(/(\d+):(\d\d)\s*\/\s*\d+:\d\d/);
+      return text ? Number(text[1]) * 60 + Number(text[2]) : null;
+    });
+  const playing = (page) => page.locator('button[title*="Pause"], button[aria-label*="Pause"]').count();
+
+  // Back to the top on both, so a difference later is the transport's doing.
+  await host.page.getByRole("button", { name: "STOP", exact: true }).click();
+  await host.page.waitForTimeout(1200);
+  recorder.check(
+    "both sides start from the top",
+    (await seconds(host.page)) === 0 && (await seconds(guest.page)) === 0,
+    `host=${await seconds(host.page)} guest=${await seconds(guest.page)}`,
+  );
+
+  // The host presses play. Nobody touches the guest.
+  await host.page.getByRole("button", { name: "FOLLOWING", exact: true }).waitFor({ timeout: 5000 });
+  await host.page.keyboard.press("Space");
+  await host.page.waitForTimeout(2500);
+  recorder.check("the host is playing", (await playing(host.page)) > 0);
+  recorder.check(
+    "and so is the guest, without being touched",
+    (await playing(guest.page)) > 0,
+    `guest pause-buttons ${await playing(guest.page)}`,
+  );
+
+  const hostAt = await seconds(host.page);
+  const guestAt = await seconds(guest.page);
+  recorder.check(
+    "both playheads are advancing together",
+    hostAt !== null && guestAt !== null && hostAt > 0 && Math.abs(hostAt - guestAt) <= 1,
+    `host=${hostAt} guest=${guestAt}`,
+  );
+  recorder.check(
+    "and the guest is told who is driving",
+    (await guest.page.locator("text=/is driving/").count()) === 1,
+    (await guest.page.locator("body").innerText()).match(/[^\n]*is driving[^\n]*/)?.[0] ?? "no driver shown",
+  );
+
+  // Pausing takes the room with it.
+  await host.page.keyboard.press("Space");
+  await host.page.waitForTimeout(1800);
+  recorder.check("the host paused", (await playing(host.page)) === 0);
+  recorder.check("and the guest paused with it", (await playing(guest.page)) === 0);
+
+  // Turning FOLLOW off means working on your own part in the middle of a rehearsal.
+  await guest.page.getByRole("button", { name: "FOLLOWING", exact: true }).click();
+  await guest.page.waitForTimeout(600);
+  recorder.check(
+    "the guest can stop following",
+    (await guest.page.getByRole("button", { name: "FOLLOW", exact: true }).count()) === 1,
+  );
+  await host.page.getByRole("button", { name: "STOP", exact: true }).click();
+  await host.page.waitForTimeout(600);
+  await host.page.keyboard.press("Space");
+  await host.page.waitForTimeout(2500);
+  recorder.check("the host is playing again", (await playing(host.page)) > 0);
+  recorder.check(
+    "and the guest is left alone once it stops following",
+    (await playing(guest.page)) === 0,
+    `guest pause-buttons ${await playing(guest.page)}`,
+  );
+
+  // Following again picks the room back up on the next action.
+  await guest.page.getByRole("button", { name: "FOLLOW", exact: true }).click();
+  await guest.page.waitForTimeout(600);
+  await host.page.keyboard.press("Space");
+  await host.page.waitForTimeout(1500);
+  await host.page.keyboard.press("Space");
+  await host.page.waitForTimeout(2000);
+  recorder.check(
+    "turning it back on rejoins the room's playhead",
+    (await playing(guest.page)) > 0,
+    `guest pause-buttons ${await playing(guest.page)}`,
+  );
+  await host.page.keyboard.press("Space");
+  await host.page.waitForTimeout(1500);
+
   // A guest owns no library entry, so they must be offered a way to keep the
   // work; the host, whose entry autosaves, must not see the offer.
   recorder.check(

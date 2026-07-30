@@ -15,6 +15,8 @@ interface CommandDeps {
   editor: EditorController;
   lib: LibraryController;
   collab: CollabController;
+  /** The session-aware transport; see collab/useSharedTransport. */
+  transport: { playPause: () => void; stop: () => void };
   sharedView: boolean;
   editing: boolean;
   canShare: boolean;
@@ -33,9 +35,12 @@ export function useCommands(deps: CommandDeps): Command[] {
     const commands: Command[] = [];
     const add = (command: Command) => commands.push(command);
 
-    // Playback works in every mode, shared views included.
-    add({ id: "play", title: c.playing ? "Pause playback" : "Play", section: "Playback", hint: "Space", run: c.playPause });
-    add({ id: "stop", title: "Stop playback", section: "Playback", run: c.stop });
+    // Playback works in every mode, shared views included. Routed through the
+    // session's transport so the palette moves the room's playhead like every other
+    // play control — a command that quietly did something different from the button
+    // beside it would be the worst kind of inconsistency.
+    add({ id: "play", title: c.playing ? "Pause playback" : "Play", section: "Playback", hint: "Space", run: deps.transport.playPause });
+    add({ id: "stop", title: "Stop playback", section: "Playback", run: deps.transport.stop });
     add({ id: "loop", title: c.loop ? "Turn loop off" : "Turn loop on", section: "Playback", run: c.toggleLoop });
     add({ id: "metronome", title: c.metronome ? "Turn metronome off" : "Turn metronome on", section: "Playback", run: c.toggleMetronome });
     add({ id: "countin", title: c.countIn ? "Turn count-in off" : "Turn count-in on", section: "Playback", run: c.toggleCountIn });

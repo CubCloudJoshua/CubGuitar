@@ -119,17 +119,39 @@ function PlayRing({
   );
 }
 
-export function TransportPill({ c }: { c: AlphaTabController }) {
+/**
+ * Play, stop and seek, routed so a live session can hear them.
+ *
+ * Optional because the pill is also the shared view's transport, where there is no
+ * session to tell. When a session is live these come from
+ * collab/useSharedTransport, and everything the user does here moves the whole
+ * room's playhead — which is why they must all go through one place rather than
+ * calling the player directly from five handlers.
+ */
+export interface TransportOverrides {
+  playPause: () => void;
+  stop: () => void;
+  seekTo: (seconds: number) => void;
+}
+
+export function TransportPill({ c, transport }: { c: AlphaTabController; transport?: TransportOverrides }) {
   const [expanded, setExpanded] = useState(false);
   const phone = usePhone();
   const disabled = !c.ready;
   const progress = c.position.endTime > 0 ? c.position.currentTime / c.position.endTime : 0;
+  const endSeconds = c.position.endTime / 1000;
 
-  const { seekFraction } = c;
+  const playPause = transport?.playPause ?? c.playPause;
+  const stop = transport?.stop ?? c.stop;
+  /** Absolute seeks, because that is what a follower can be told to do. */
+  const seekTo = transport?.seekTo ?? c.seekTo;
+  const seekBy = (delta: number) => seekTo(Math.max(0, c.position.currentTime / 1000 + delta));
+
   const scrubTo = (track: HTMLElement, clientX: number) => {
     const box = track.getBoundingClientRect();
-    if (box.width <= 0) return;
-    seekFraction((clientX - box.left) / box.width);
+    if (box.width <= 0 || endSeconds <= 0) return;
+    const fraction = Math.max(0, Math.min(1, (clientX - box.left) / box.width));
+    seekTo(fraction * endSeconds);
   };
 
   return (
@@ -251,10 +273,10 @@ export function TransportPill({ c }: { c: AlphaTabController }) {
           progress={progress}
           disabled={disabled}
           compact={phone}
-          onClick={c.playPause}
+          onClick={playPause}
         />
         {!phone && (
-          <Button size="sm" onClick={c.stop} disabled={disabled} style={{ borderRadius: 999 }}>
+          <Button size="sm" onClick={stop} disabled={disabled} style={{ borderRadius: 999 }}>
             STOP
           </Button>
         )}
@@ -297,9 +319,9 @@ export function TransportPill({ c }: { c: AlphaTabController }) {
           }}
           onKeyDown={(ev) => {
             if (disabled) return;
-            if (ev.key === "ArrowRight") c.seekSeconds(5);
-            else if (ev.key === "ArrowLeft") c.seekSeconds(-5);
-            else if (ev.key === "Home") c.seekFraction(0);
+            if (ev.key === "ArrowRight") seekBy(5);
+            else if (ev.key === "ArrowLeft") seekBy(-5);
+            else if (ev.key === "Home") seekTo(0);
             else return;
             ev.preventDefault();
             // The editor listens for arrows on the document to move its caret.
