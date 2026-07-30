@@ -72,9 +72,17 @@ fidelity), the audio check, and the end-to-end suites on every push.
 tested in headless browsers with no audio device, so every other gate checks the
 notation and assumes the sound. alphaTab can synthesize to raw samples instead of
 to a speaker, so this measures what actually came out: peak, RMS, clipping, and
-the share of 100ms windows containing anything audible. A soundfont that fails to
-load, a muted track, or a synth that never starts all render perfect notation
-over perfect silence, and this is the only thing that would notice.
+the share of 100ms windows containing anything audible.
+
+What it proves, precisely: the soundfont is served at the path the app configures,
+and every score in `fixtures/` and `corpus/` synthesizes to audible, unclipped
+audio with it. Remove the soundfont and all of them go silent and the check
+fails. What it does not prove is the app's own player instance being wired
+correctly, because the harness constructs its own synthesizer rather than
+capturing the live player's output — that would need Web Audio interception. The
+e2e suites cover the near half of that gap: they wait for the app's player to
+report ready, which only happens once it has loaded that soundfont, and they
+drive playback to a running state and back.
 
 `pnpm e2e` needs `pnpm build` first. It stands up the API and sync services on
 isolated ports against a throwaway data directory, so it never touches a running
