@@ -486,3 +486,63 @@ describe("an empty score", () => {
     expect(parsed.trackNames[0]).toBe("Nothing");
   });
 });
+
+describe("held notes never overrun the next of the same pitch", () => {
+  /**
+   * A note-off arriving after the *next* note-on of the same key makes a synth cut
+   * the new note dead: one note lost, silently, per overlap. Let-ring is where this
+   * bites, because it deliberately extends a note past its beat.
+   */
+  function letRingRun(): Score {
+    let score = createScore("Let ring");
+    score = withNote(score, 0, 0, 5);
+    score = withNote(score, 0, 1, 5);
+    score = withNote(score, 0, 2, 5);
+    const notes = score.tracks[0]!.bars[0]!.voices[0]!.beats.flatMap((b) => b.notes);
+    return applyBatch(
+      score,
+      batch(...notes.map((n): OpKind => ({ type: "note.addArticulation", noteId: n.id, articulation: "letRing" }))),
+    );
+  }
+
+  it("writes every let-ring note", () => {
+    // Worth stating what this does *not* check: a synth that receives a note-off
+    // after the next note-on of the same key cuts the new note dead, and our reader
+    // does not reproduce that — it queues overlapping same-key notes and recovers
+    // all of them. So this passes with or without the clamp, and the ordering test
+    // below is the one that actually holds the behaviour.
+    const { parsed } = roundTrip(letRingRun());
+    expect(parsed.notes).toHaveLength(3);
+  });
+
+  it("ends each one before the next of the same key begins", () => {
+    const { parsed } = roundTrip(letRingRun());
+    const sorted = [...parsed.notes].sort((a, b) => a.startTicks - b.startTicks);
+    for (let i = 1; i < sorted.length; i += 1) {
+      const previous = sorted[i - 1]!;
+      expect(previous.startTicks + previous.durationTicks).toBeLessThan(sorted[i]!.startTicks);
+    }
+  });
+
+  it("still lets a let-ring note run past its beat when nothing follows it", () => {
+    // The clamp must not turn let-ring into a plain note: the last one has no next
+    // onset to bump into and keeps its full length.
+    const { parsed } = roundTrip(letRingRun());
+    const last = [...parsed.notes].sort((a, b) => a.startTicks - b.startTicks).at(-1);
+    expect(last?.durationTicks).toBeGreaterThan(QUARTER_TICKS);
+  });
+
+  it("does not clamp a different pitch that happens to follow", () => {
+    let score = createScore("Different pitches");
+    score = withNote(score, 0, 0, 5);
+    score = withNote(score, 0, 1, 7);
+    const first = score.tracks[0]!.bars[0]!.voices[0]!.beats[0]!.notes[0]!;
+    const held = applyBatch(
+      score,
+      batch({ type: "note.addArticulation", noteId: first.id, articulation: "letRing" }),
+    );
+    const { parsed } = roundTrip(held);
+    const low = parsed.notes.find((n) => n.key === 69);
+    expect(low?.durationTicks).toBeGreaterThan(QUARTER_TICKS);
+  });
+});

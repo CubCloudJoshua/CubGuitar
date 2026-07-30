@@ -222,9 +222,32 @@ export function toMidi(score: Score, line: Timeline = buildTimeline(score)): Mid
     // as 1,616 extra note events in one nine-minute file before this.
     const notes = mergeTies(line.notes.filter((n) => n.trackIndex === index));
 
+    // When the same key sounds again on this channel, so a held note can be cut
+    // short rather than overrunning it. Let-ring deliberately extends a note past
+    // its beat, and a note-off arriving after the *next* note-on of the same key
+    // makes a synth cut the new note dead — one note lost per let-ring, which is
+    // the opposite of what let-ring means.
+    const nextOnset = new Map<number, number>();
+    {
+      const lastSeen = new Map<number, number>();
+      for (const note of [...notes].sort((a, b) => b.startTicks - a.startTicks)) {
+        const key = Math.max(0, Math.min(127, Math.round(note.pitch)));
+        const later = lastSeen.get(key);
+        if (later !== undefined) nextOnset.set(note.startTicks * 128 + key, later);
+        lastSeen.set(key, note.startTicks);
+      }
+    }
+
     for (const note of notes) {
       const key = Math.max(0, Math.min(127, Math.round(note.pitch)));
-      const held = heldTicks(note.durationTicks, note.articulations);
+      const ceiling = nextOnset.get(note.startTicks * 128 + key);
+      const held = Math.min(
+        heldTicks(note.durationTicks, note.articulations),
+        // One tick clear of the next onset, for the same reason a plain note ends a
+        // hair before the next begins: simultaneous note-off and note-on on one key
+        // is undefined behaviour.
+        ceiling === undefined ? Number.POSITIVE_INFINITY : Math.max(1, ceiling - note.startTicks - 1),
+      );
       const velocity = velocityFor(note.articulations);
       const bends = note.articulations.includes("bend");
 

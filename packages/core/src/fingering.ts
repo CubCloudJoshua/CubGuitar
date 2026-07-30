@@ -219,11 +219,24 @@ export function fingerSequence(
     const layer: Node[] = [];
 
     if (candidates.length === 0) {
-      // Nothing in this chord is playable. The hand does not move, so the previous
-      // layer carries straight through — otherwise a single unreachable note would
+      // Nothing in this chord is playable. The hand does not move, so the best path
+      // so far carries straight through — otherwise a single unreachable note would
       // reset the position and make everything after it jump.
-      const best = cheapest(previous);
-      layer.push({ positions: [], cost: best?.cost ?? 0, anchor: best?.anchor ?? null, from: best?.from ?? -1 });
+      //
+      // `from` is the *index* of that best path in the previous layer. It held
+      // `best.from` instead, which is that node's own predecessor — an index into
+      // the layer before it, used against this one. The walk-back therefore
+      // reported an arbitrary fingering for the chord before an unplayable note:
+      // [[88],[65],[20],[67]] came out as frets 24, 1, -, 22, a twenty-three fret
+      // leap and back, which is the exact failure this module exists to prevent.
+      const bestIndex = cheapestIndex(previous);
+      const best = previous[bestIndex];
+      layer.push({
+        positions: [],
+        cost: best?.cost ?? 0,
+        anchor: best?.anchor ?? null,
+        from: bestIndex,
+      });
       layers.push(layer);
       previous = layer;
       continue;
@@ -256,26 +269,33 @@ export function fingerSequence(
     previous = layer;
   }
 
-  // Walk back from the cheapest final node.
+  // Walk back from the cheapest final node, following `from` and nothing else.
+  // There used to be a `?? cheapest(layer)` fallback here, which turned a broken
+  // predecessor index into a plausible-looking wrong answer rather than a visible
+  // failure. Every layer holds at least one node and every `from` in a layer past
+  // the first points into the layer before it, so the chain is total.
   const out: FretPosition[][] = [];
   let index = layers.length - 1;
-  let node = cheapest(previous);
+  let node: Node | undefined = previous[cheapestIndex(previous)];
   while (index >= 0 && node) {
     out.unshift(node.positions);
     const from = node.from;
     index -= 1;
-    node = index >= 0 ? layers[index]?.[from] ?? cheapest(layers[index] ?? []) : undefined;
+    node = index >= 0 ? layers[index]?.[from] : undefined;
   }
   // A chord whose layer was empty still needs a slot, so the result lines up with
   // the input one-to-one.
   while (out.length < chords.length) out.unshift([]);
 
-  return { chords: out, unreachable, cost: cheapest(previous)?.cost ?? 0 };
+  return { chords: out, unreachable, cost: previous[cheapestIndex(previous)]?.cost ?? 0 };
 }
 
-function cheapest<T extends { cost: number }>(nodes: readonly T[]): T | undefined {
-  let best: T | undefined;
-  for (const node of nodes) if (!best || node.cost < best.cost) best = node;
+/** Index of the cheapest node, or -1 for an empty layer. */
+function cheapestIndex(nodes: readonly { cost: number }[]): number {
+  let best = -1;
+  for (const [index, node] of nodes.entries()) {
+    if (best < 0 || node.cost < (nodes[best]?.cost ?? Infinity)) best = index;
+  }
   return best;
 }
 

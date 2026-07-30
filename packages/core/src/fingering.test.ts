@@ -121,6 +121,18 @@ describe("a run of single notes", () => {
     expect(chords[2]?.[0]).toBeDefined();
   });
 
+  it("reports the right fingering for the note before an unplayable one", () => {
+    // E6 is playable only at fret 24 of the top string, so the hand starts high, and
+    // F4 is then cheapest high up (fret 20 of the A string) rather than at fret 1 —
+    // a candidate that is *last* in the enumeration. That is what makes this case
+    // able to tell a correct predecessor index from a wrong one, and it caught the
+    // path reconstruction storing a node's own predecessor instead of its index:
+    // the answer came out as frets 24, 1, -, 22, a twenty-three fret leap and back.
+    const { chords } = fingerSequence(guitar, [[88], [65], [20], [67]]);
+    expect(chords[1]?.[0]?.fret).toBeGreaterThan(12);
+    expect(largestLeap(chords)).toBeLessThanOrEqual(6);
+  });
+
   it("does not let an unreachable note reset the hand position", () => {
     // The hand is at the twelfth fret; then a note nothing can play; then F4, which
     // is reachable both at fret 1 of the top string and fret 10 of the G string.
