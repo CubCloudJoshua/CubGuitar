@@ -4,5 +4,6 @@ export * from "./apply.js";
 export * from "./session.js";
 export * from "./invert.js";
 export * from "./timeline.js";
+export * from "./fingering.js";
 export * from "./build.js";
 export * from "./alphatex.js";

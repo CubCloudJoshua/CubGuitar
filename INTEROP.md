@@ -64,12 +64,13 @@ neck, and choosing among them is a fingering decision.
 - Quantisation. A MIDI file recorded from a keyboard has no bar lines and no
   intended note durations. Snapping to a grid needs a tolerance and a tempo, and it
   needs to be visible and adjustable rather than silently applied.
-- Pitch to (string, fret). Naively "the lowest fret that reaches it" gives
-  unplayable jumps. The right formulation is a shortest-path over the sequence,
-  costing hand movement and stretch, which is a dynamic-programming problem with a
-  small state space and a tunable cost function. `apps/web/src/iso/IsoView.tsx`
-  already contains the naive version for notes that arrive without fingering, which
-  is honest for a reader and not good enough for an import.
+- ~~Pitch to (string, fret).~~ **Built**: `packages/core/src/fingering.ts`. A
+  shortest path over hand position rather than a lookup — movement, stretch and open
+  strings, with the weights stated and adjustable. It replaced the naive
+  lowest-playable-fret rule that was inline in the fretboard reader, which is the
+  rule that sends a hand from fret 12 to fret 2 and back between consecutive notes.
+  Four things share it: the reader, MIDI import, MusicXML import, and arranging a
+  keyboard or vocal line for guitar.
 - Track splitting. A type-0 file is one track holding everything; a guitar part and
   a bass part have to be separated by channel and range.
 
@@ -262,8 +263,9 @@ Value per unit of risk, same as STANDALONE.md.
 4. **Percussion in the model.** Weeks. Unblocks four separate things and closes the
    gap our own import reports name most often.
 5. **MusicXML export.** Weeks. Opens the notation-world direction.
-6. **MIDI file import**, with fingering inference. Weeks, and the first place a
-   model earns its keep on musical judgement rather than plumbing.
+6. **MIDI file import**. Weeks. The fingering half is done; what remains is
+   quantisation and track splitting, and it is the first place a model earns its
+   keep on musical judgement rather than plumbing.
 7. **Web MIDI**: pedals, then note entry, then clock sync. Days each, and the
    hexaphonic-pickup path is a genuinely differentiated demo.
 8. **Guitar Pro import**, ours rather than alphaTab's. Weeks, deliberately last:

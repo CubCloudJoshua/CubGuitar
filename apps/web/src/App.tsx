@@ -11,7 +11,7 @@ import { collabIdFromLocation, useCollab } from "./collab/useCollab";
 import { PeerCarets, PeerRoster } from "./collab/PeerCarets";
 import { caretEntry, caretsVisible, JoinReveal, useJoinReveal } from "./collab/JoinReveal";
 import { IsoPanel } from "./iso/IsoView";
-import { timeline as buildTimeline } from "@cubscore/core";
+import { frettedGuitar, timeline as buildTimeline } from "@cubscore/core";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
 import { BarMarkings } from "./editor/BarMarkings";
@@ -141,6 +141,20 @@ export function App() {
    */
   const showFretboard = fretboard && editing && !performing;
   const scoreTimeline = useMemo(() => buildTimeline(editor.score), [editor.score]);
+  /**
+   * The neck the fretboard reader draws.
+   *
+   * The selected track's own instrument when it has strings. When it does not — a
+   * piano or vocal staff — the score's first fretted instrument, so a keyboard line
+   * can be read on a guitar, which is a real thing a guitarist wants. Standard
+   * tuning is the last resort, for a score with no fretted part at all.
+   */
+  const neck = useMemo(() => {
+    const selected = editor.score.tracks[editor.cursor.track]?.instrument;
+    if (selected?.kind === "fretted") return selected;
+    const fretted = editor.score.tracks.find((t) => t.instrument.kind === "fretted")?.instrument;
+    return fretted ?? frettedGuitar();
+  }, [editor.score, editor.cursor.track]);
   const currentEntry = lib.entries.find((e) => e.id === lib.currentId);
   const canEditCurrent = !shared.active && currentEntry?.core != null;
   const canShare = !shared.active && currentEntry !== undefined;
@@ -496,7 +510,7 @@ export function App() {
             <IsoPanel
               timeline={scoreTimeline}
               seconds={c.position.currentTime / 1000}
-              track={editor.score.tracks[editor.cursor.track]}
+              neck={neck}
               trackIndex={editor.cursor.track}
             />
           )}

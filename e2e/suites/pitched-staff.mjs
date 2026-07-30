@@ -127,4 +127,50 @@ export async function run({ browser, baseUrl, recorder }) {
     /nothing here CubScore can edit/.test(notice) && /percussion is not editable/.test(notice),
     (notice.match(/nothing here[^\n]*/) ?? ["no notice"])[0],
   );
+
+  // The fretboard reader can show a pitched staff, because fingering one is exactly
+  // the problem @cubscore/core's `fingerSequence` solves: pitches in, playable
+  // positions out. That is the user-visible payoff of extracting it — a piano part
+  // you can see where to put your hands for, on a staff that cannot be typed into.
+  //
+  // Re-imported first: the drum-file case above leaves a document with no editable
+  // track, so an earlier version of this section quietly did nothing at all.
+  await page.setInputFiles('input[type="file"]', FIXTURE);
+  await settle(4000);
+  await page.getByRole("button", { name: "EDIT", exact: true }).click();
+  await settle(2500);
+  await page.locator(`${RAIL} button[aria-label^="Track 2"]`).click();
+  await settle(1200);
+  recorder.check(
+    "back on the piano staff",
+    ((await page.locator(`${RAIL} button[aria-current="true"]`).getAttribute("aria-label")) ?? "").includes("Piano"),
+  );
+
+  await page.getByRole("button", { name: "FRETBOARD", exact: true }).click();
+  await settle(1800);
+  const placed = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("[data-iso-note]")).map((el) => ({
+      fret: Number(el.getAttribute("data-iso-note")),
+      string: Number(el.getAttribute("data-iso-note-string")),
+    })),
+  );
+  recorder.check(
+    "a staff with no fingering of its own is still placed on the neck",
+    placed.length > 0,
+    JSON.stringify(placed),
+  );
+  recorder.check(
+    "every inferred position is on a real string at a real fret",
+    placed.length > 0 && placed.every((p) => p.string >= 1 && p.string <= 6 && p.fret >= 0 && p.fret <= 24),
+    JSON.stringify(placed),
+  );
+  // The hand stays put. Choosing each note's lowest playable position independently
+  // — the rule this replaced — spreads a phrase across the whole neck.
+  const frets = placed.filter((p) => p.fret > 0).map((p) => p.fret);
+  const span = frets.length > 1 ? Math.max(...frets) - Math.min(...frets) : 0;
+  recorder.check(
+    "and they sit within a hand's reach rather than across the neck",
+    span <= 9,
+    `span ${span} across ${JSON.stringify(frets)}`,
+  );
 }

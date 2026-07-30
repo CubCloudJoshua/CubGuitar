@@ -22,7 +22,14 @@
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { color, font, typeScale } from "@cubscore/design";
-import { mergeTies, stringCount, type TimedNote, type Timeline, type Track } from "@cubscore/core";
+import {
+  fingerSequence,
+  mergeTies,
+  type FretPosition,
+  type Instrument,
+  type TimedNote,
+  type Timeline,
+} from "@cubscore/core";
 
 /**
  * The projection. Two vectors, one per axis of the neck, applied to (fret, string).
@@ -143,40 +150,67 @@ export interface IsoViewProps {
   timeline: Timeline;
   /** Playback position in seconds. The one number this view follows. */
   seconds: number;
-  /** The track being read; supplies the tuning and therefore the strings. */
-  track: Track | undefined;
+  /**
+   * The neck to draw, and to finger against.
+   *
+   * Not necessarily the selected track's own instrument. Reading a piano part on a
+   * fretboard is a real thing to want — it is how a guitarist learns a keyboard
+   * line — and it means the strings come from a *guitar* while the notes come from
+   * the piano. Fingering the piano part against the piano's own instrument yields
+   * nothing at all, because a piano has no strings to put a fret on, which is
+   * exactly the bug this parameter exists to have fixed.
+   */
+  neck: Instrument;
   trackIndex: number;
   width: number;
   height: number;
 }
 
 /**
- * A note's fret, for a view whose whole job is where the hand goes.
+ * Fingering for notes that arrived without any — an imported pitched staff, a MIDI
+ * file, anything that records pitch and not where a hand goes.
  *
- * Falls back to deriving it from pitch and tuning, because a note imported from a
- * pitched staff carries no fingering. Guessing the lowest playable position is
- * what a guitarist does with a piano part, and it beats not drawing the note.
+ * Solved for the whole part at once by @cubscore/core's `fingerSequence`, not note
+ * by note. This file used to guess the lowest playable position for each note
+ * independently, which is the rule that sends a hand from fret 12 to fret 2 and
+ * back between consecutive notes: every note individually reasonable and the
+ * phrase unplayable. Moving the decision into core is what let the reader, MIDI
+ * import and MusicXML import share one answer.
+ *
+ * Keyed by note id, so a caret drawn from this is the same one the exporter would
+ * write.
  */
-function fretOf(note: TimedNote, track: Track | undefined): { string: number; fret: number } | null {
-  if (note.string !== undefined && note.fret !== undefined) {
-    return { string: note.string, fret: note.fret };
+function inferFingering(notes: readonly TimedNote[], neck: Instrument): Map<string, FretPosition> {
+  const needing = notes.filter((n) => n.string === undefined || n.fret === undefined);
+  if (needing.length === 0) return new Map();
+  // Grouped by onset, so notes that sound together are fingered as a chord rather
+  // than as a sequence that happens to be simultaneous.
+  const byTick = new Map<number, TimedNote[]>();
+  for (const note of needing) {
+    const group = byTick.get(note.startTicks) ?? [];
+    group.push(note);
+    byTick.set(note.startTicks, group);
   }
-  if (track?.instrument.kind !== "fretted") return null;
-  const { tuning, capo, frets } = track.instrument;
-  let best: { string: number; fret: number } | null = null;
-  for (const [i, open] of tuning.entries()) {
-    const fret = note.pitch - open - capo;
-    // Prefer the highest string that can reach it, which is the position a
-    // player's hand is most likely already in.
-    if (fret >= 0 && fret <= frets && (best === null || fret < best.fret)) {
-      best = { string: i + 1, fret };
+  const ticks = [...byTick.keys()].sort((a, b) => a - b);
+  const groups = ticks.map((tick) => byTick.get(tick) ?? []);
+  const { chords } = fingerSequence(
+    neck,
+    groups.map((group) => group.map((n) => n.pitch)),
+  );
+
+  const out = new Map<string, FretPosition>();
+  for (const [index, group] of groups.entries()) {
+    const placed = chords[index] ?? [];
+    for (const [j, note] of group.entries()) {
+      const position = placed[j];
+      if (position) out.set(note.id, position);
     }
   }
-  return best;
+  return out;
 }
 
-export function IsoView({ timeline: line, seconds, track, trackIndex, width, height }: IsoViewProps) {
-  const strings = stringCount(track);
+export function IsoView({ timeline: line, seconds, neck, trackIndex, width, height }: IsoViewProps) {
+  const strings = neck.kind === "fretted" ? neck.tuning.length : 6;
 
   // The neck is anchored so the strike line sits in the lower left and the neck
   // runs up and to the right. Notes arrive from the top right.
@@ -190,6 +224,10 @@ export function IsoView({ timeline: line, seconds, track, trackIndex, width, hei
     line,
     trackIndex,
   ]);
+
+  // Solved once per document rather than per frame: the fingering of a phrase does
+  // not change as the playhead moves through it.
+  const inferred = useMemo(() => inferFingering(sounding, neck), [sounding, neck]);
 
   const visible = useMemo(() => {
     const from = seconds - LOOKBEHIND_SECONDS;
@@ -298,7 +336,10 @@ export function IsoView({ timeline: line, seconds, track, trackIndex, width, hei
       {[...visible]
         .sort((a, b) => b.startSeconds - a.startSeconds)
         .map((note) => {
-          const placed = fretOf(note, track);
+          const placed =
+            note.string !== undefined && note.fret !== undefined
+              ? { string: note.string, fret: note.fret }
+              : inferred.get(note.id);
           if (!placed) return null;
           const ahead = note.startSeconds - seconds;
           const at = project(ahead, placed.string - 1, g);
@@ -345,7 +386,7 @@ export function IsoView({ timeline: line, seconds, track, trackIndex, width, hei
 export function IsoPanel({
   timeline: line,
   seconds,
-  track,
+  neck,
   trackIndex,
 }: Omit<IsoViewProps, "width" | "height">) {
   const boxRef = useRef<HTMLDivElement | null>(null);
@@ -374,7 +415,7 @@ export function IsoPanel({
         <IsoView
           timeline={line}
           seconds={seconds}
-          track={track}
+          neck={neck}
           trackIndex={trackIndex}
           width={size.width}
           height={size.height}
