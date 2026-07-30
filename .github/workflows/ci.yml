@@ -44,7 +44,15 @@ jobs:
       - name: Audio output
         run: pnpm audio
 
-      # Drives the built app in a real browser across nine journeys, standing up
-      # the API and sync services against a throwaway data directory.
+      # Our own timeline against what alphaTab actually plays, by synthesizing
+      # each score to its end and comparing total length. The timeline is what
+      # every view drawn from our model reads, so drift here shows up as notes
+      # landing in the wrong place — and this is what found a bar being given the
+      # length of its written beats rather than the length of its meter.
+      - name: Timeline agrees with playback
+        run: pnpm timing
+
+      # Drives the built app in a real browser across twelve journeys, standing
+      # up the API and sync services against a throwaway data directory.
       - name: End-to-end suites
         run: pnpm e2e
