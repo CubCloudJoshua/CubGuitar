@@ -133,8 +133,9 @@ export interface MidiCompareResult {
   /** Notes we wrote that alphaTab did not, and the reverse, as pitch counts. */
   missing?: string[];
   extra?: string[];
-  /** How many of alphaTab's notes were on the percussion channel we do not carry. */
-  percussionDropped?: number;
+  /** Channel-10 note counts on both sides, which grades the drum-voice mapping. */
+  percussion?: { ours: number; theirs: number };
+  drumsMissing?: string[];
   unsupported?: string[];
 }
 
@@ -327,8 +328,10 @@ async function roundTrip(trigger: () => void): Promise<RoundTripResult> {
 
   const source = api.score;
   if (!source) return { ok: false, error: "no score after load" };
-  // Percussion is deliberately dropped by the importer, so exclude it from the
-  // pitch comparison rather than reporting it as drift.
+  // Percussion is excluded from the *round trip* comparison because the trip goes
+  // through alphaTex, which does not carry drum tracks — see toAlphaTex for the
+  // measurement behind that. The model does carry them, and `pnpm midi` is where
+  // that is graded, against alphaTab's own channel-10 notes.
   const original = collect(source, true);
   original.tracks = source.tracks.length;
 
@@ -536,20 +539,22 @@ async function compareMidi(trigger: () => void): Promise<MidiCompareResult> {
   try {
     const oursParsed = parseMidi(mine.bytes);
     const theirsParsed = parseMidi(theirBytes);
-    // Percussion is dropped by our importer on purpose, and the import report
-    // already says so on every file that has a drum track. Comparing their
-    // channel-10 notes against our absent ones would report the same known gap a
-    // second time, as MIDI drift, and would hide real drift behind it. So the
-    // comparison is of pitched content, and the percussion is counted separately.
-    const theirPitched = theirsParsed.notes.filter((n) => n.channel !== 9);
-    const percussionDropped = theirsParsed.notes.length - theirPitched.length;
+    // Percussion is compared now rather than excluded. It used to be filtered out
+    // because our importer dropped drum tracks, so their channel-10 notes counted
+    // as our drift and reported a known gap twice. Now that drums are carried, this
+    // comparison is what grades the drum-voice mapping: alphaTab reports a
+    // percussion articulation index, we write it as a channel-10 key, and if that
+    // number is not the General MIDI drum number the pitch multisets diverge here.
+    const ourDrums = oursParsed.notes.filter((n) => n.channel === 9);
+    const theirDrums = theirsParsed.notes.filter((n) => n.channel === 9);
     return {
       ok: true,
       ours: summarise(oursParsed, oursParsed.notes),
-      theirs: summarise(theirsParsed, theirPitched),
-      percussionDropped,
-      missing: pitchDiff(theirPitched.map((n) => n.key), oursParsed.notes.map((n) => n.key)),
-      extra: pitchDiff(oursParsed.notes.map((n) => n.key), theirPitched.map((n) => n.key)),
+      theirs: summarise(theirsParsed, theirsParsed.notes),
+      percussion: { ours: ourDrums.length, theirs: theirDrums.length },
+      drumsMissing: pitchDiff(theirDrums.map((n) => n.key), ourDrums.map((n) => n.key)),
+      missing: pitchDiff(theirsParsed.notes.map((n) => n.key), oursParsed.notes.map((n) => n.key)),
+      extra: pitchDiff(oursParsed.notes.map((n) => n.key), theirsParsed.notes.map((n) => n.key)),
       unsupported: mine.report.unsupported,
     };
   } catch (e) {

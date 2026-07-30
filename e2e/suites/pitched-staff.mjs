@@ -123,8 +123,11 @@ export async function run({ browser, baseUrl, recorder }) {
   );
   const notice = await page.locator("body").innerText();
   recorder.check(
-    "and the player says why",
-    /nothing here CubScore can edit/.test(notice) && /percussion is not editable/.test(notice),
+    "and the player says why, naming which half of percussion works",
+    // The wording changed with the model: drum tracks are carried and exported to
+    // MIDI now, and only the *notation* is not editable. A report that still said
+    // "percussion is not editable" would be understating what the file can do.
+    /nothing here CubScore can edit/.test(notice) && /drum notation is not editable/.test(notice),
     (notice.match(/nothing here[^\n]*/) ?? ["no notice"])[0],
   );
 

@@ -48,6 +48,15 @@ function tiedStrings(beat: Beat): Set<number> {
 }
 
 function noteToken(beat: Beat, instrument: Instrument, tiedFromPrev: Set<number>): string {
+  // A percussion staff takes drum voices, not pitches — alphaTex rejects a pitch
+  // name outright ("Cannot use pitched note value on percussion staff"). The voice
+  // number goes in parentheses even when there is only one of them, which is the
+  // one form of the four candidates tried that the parser accepts.
+  if (instrument.kind === "drums") {
+    if (beat.notes.length === 0) return "r";
+    return `(${beat.notes.map((note) => String(Math.round(note.pitch))).join(" ")})`;
+  }
+
   const parts = beat.notes.map((note) => {
     const effects = note.articulations
       .map((a) => NOTE_EFFECTS[a])
@@ -138,7 +147,8 @@ function trackToTex(track: Track): string {
   } else if (track.instrument.kind === "pitched") {
     lines.push(`\\staff{score} \\instrument ${track.instrument.midiProgram}`);
   } else {
-    lines.push("\\instrument percussion");
+    // `\staff{score}` is required: a percussion track without it fails to parse.
+    lines.push("\\staff{score} \\instrument percussion");
     lines.push("\\articulation defaults");
   }
 
@@ -158,8 +168,25 @@ export function toAlphaTex(score: Score): string {
   const header = [`\\title "${score.title.replace(/"/g, "'")}"`];
   if (score.artist) header.push(`\\artist "${score.artist.replace(/"/g, "'")}"`);
   header.push(".");
-  // Percussion needs articulation names the model does not carry yet, so drum
-  // tracks are omitted rather than serialized into notation that would be wrong.
+  /**
+   * Drum tracks are still omitted, and now for a measured reason rather than an
+   * assumed one.
+   *
+   * The model carries percussion as General MIDI drum numbers, and a percussion
+   * staff does take a number in parentheses — `(38).4` parses. But that number is
+   * an *index into the staff's articulation list*, not a drum number. Writing all
+   * 47 GM voices under `\articulation defaults` and reading back what alphaTab's
+   * own MIDI generator sounded gave exactly five notes, voices 35 to 39: every
+   * index past the end of the default list is silent. So writing drum numbers here
+   * would produce a file that renders a full kit and plays five sounds, which is
+   * worse than a track the player is honest about not editing.
+   *
+   * What this needs is for the tex to declare its own articulation list, so the
+   * index we write is one we defined. That is the next step, and it starts from
+   * this measurement rather than from a guess. Percussion *is* carried through the
+   * model and out to MIDI on channel 10, where it is graded against alphaTab's own
+   * channel-10 notes by `pnpm midi`.
+   */
   const tracks = score.tracks.filter((t) => t.instrument.kind !== "drums");
   const body = tracks.length > 0 ? tracks.map(trackToTex).join("\n\n") : trackToTex(EMPTY_TRACK);
   return `${header.join("\n")}\n${body}\n`;

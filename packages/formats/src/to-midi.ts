@@ -56,6 +56,11 @@ export interface MidiExportResult {
 /** A plain note-on velocity, before articulations adjust it. */
 const BASE_VELOCITY = 95;
 /**
+ * How long a drum note is gated. A sixteenth: long enough for every sampler to
+ * trigger, short enough that consecutive hits on one voice never overlap.
+ */
+const DRUM_GATE_TICKS = 240;
+/**
  * How far a bend rises, in semitones, and the bend range a receiving synth is
  * assumed to be set to. Two semitones is the General MIDI default and the most
  * common guitar bend, so a whole-tone bend needs no RPN setup to sound right.
@@ -200,23 +205,31 @@ export function toMidi(score: Score, line: Timeline = buildTimeline(score)): Mid
   tracks.push(writeTrackChunk(conductor.events, conductor.name));
 
   let noteCount = 0;
+  /** Pitched parts take channels in order; the drum channel is not one of them. */
+  let pitchedSoFar = 0;
   for (const [index, track] of score.tracks.entries()) {
-    if (track.instrument.kind === "drums") {
-      // Percussion is dropped by the importer today, so a drum track here holds no
-      // notes to write. Saying so is the point: see INTEROP.md §5.
-      unsupported.add(`drum track "${track.name}" (percussion is not in the model yet)`);
-      continue;
+    const drums = track.instrument.kind === "drums";
+
+    // Percussion goes on channel 10, which the specification reserves for it: the
+    // key is the drum voice rather than a pitch, and every synth knows the kit
+    // without being told a program. Every drum track shares the channel, because
+    // there is only one and they are all the same instrument.
+    let channel: number;
+    if (drums) {
+      channel = DRUM_CHANNEL;
+    } else {
+      channel = PITCHED_CHANNELS[pitchedSoFar % PITCHED_CHANNELS.length] ?? 0;
+      if (pitchedSoFar >= PITCHED_CHANNELS.length) {
+        unsupported.add("more than 15 pitched tracks (MIDI channels are reused)");
+      }
+      pitchedSoFar += 1;
     }
 
-    // One channel per part, skipping the percussion channel. Beyond fifteen parts
-    // channels are reused, which makes program changes fight; a score that large
-    // is rare enough to report rather than solve.
-    const channel = PITCHED_CHANNELS[index % PITCHED_CHANNELS.length] ?? 0;
-    if (index >= PITCHED_CHANNELS.length) {
-      unsupported.add("more than 15 pitched tracks (MIDI channels are reused)");
-    }
-
-    const events: Event[] = [{ tick: 0, rank: 0, bytes: [PROGRAM_CHANGE | channel, programFor(track)] }];
+    // No program change on the drum channel: the kit is implied by the channel, and
+    // sending one there makes some synths substitute a melodic instrument.
+    const events: Event[] = drums
+      ? []
+      : [{ tick: 0, rank: 0, bytes: [PROGRAM_CHANGE | channel, programFor(track)] }];
     // Ties joined first: a tie means hold the last note, not play it again, so a
     // second note-on would be audibly wrong. Measured against alphaTab's own MIDI
     // as 1,616 extra note events in one nine-minute file before this.
@@ -241,7 +254,13 @@ export function toMidi(score: Score, line: Timeline = buildTimeline(score)): Mid
     for (const note of notes) {
       const key = Math.max(0, Math.min(127, Math.round(note.pitch)));
       const ceiling = nextOnset.get(note.startTicks * 128 + key);
-      const held = Math.min(
+      // A drum voice is a hit: its length is the decay of the sample, not something
+      // the score decides, so a short fixed gate is more faithful than a note held
+      // for its written duration. Cymbals ring on regardless; a kick does not get
+      // longer because it was written as a whole note.
+      const held = drums
+        ? Math.min(DRUM_GATE_TICKS, Math.max(1, note.durationTicks))
+        : Math.min(
         heldTicks(note.durationTicks, note.articulations),
         // One tick clear of the next onset, for the same reason a plain note ends a
         // hair before the next begins: simultaneous note-off and note-on on one key

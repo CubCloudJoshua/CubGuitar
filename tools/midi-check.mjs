@@ -124,27 +124,17 @@ async function main() {
         continue;
       }
 
-      const { ours, theirs, missing, extra, unsupported, percussionDropped } = result;
-      // A score with no pitched content on either side is a percussion-only file,
-      // which our model does not carry. The importer already reports why, and
-      // calling it MIDI drift would report the same known gap a second time.
-      if (ours.notes === 0 && theirs.notes === 0) {
-        rows.push({
-          rel,
-          ok: true,
-          ours: 0,
-          theirs: 0,
-          note: `no pitched content — ${percussionDropped} percussion notes not carried by the model`,
-        });
-        for (const u of unsupported ?? []) notes.push(u);
-        continue;
-      }
+      const { ours, theirs, missing, extra, unsupported, percussion, drumsMissing } = result;
 
       const allowed = Math.max(NOTE_TOLERANCE_FLOOR, theirs.notes * NOTE_TOLERANCE_RATIO);
       const noteDrift = Math.abs(ours.notes - theirs.notes);
       const lengthDrift = Math.abs(ours.lastTick - theirs.lastTick);
       const divisionOk = ours.ticksPerQuarter > 0 && theirs.ticksPerQuarter > 0;
-      const ok = noteDrift <= allowed && lengthDrift <= LENGTH_TOLERANCE_QUARTERS && divisionOk;
+      // Drum voices are graded on the multiset, not the count: writing the right
+      // number of hits on the wrong voices would sound like a different kit and
+      // pass a count comparison.
+      const drumsOk = (drumsMissing ?? []).length === 0;
+      const ok = noteDrift <= allowed && lengthDrift <= LENGTH_TOLERANCE_QUARTERS && divisionOk && drumsOk;
       if (!ok) failures += 1;
 
       rows.push({
@@ -155,11 +145,11 @@ async function main() {
         noteDrift,
         lengthDrift,
         allowed: Math.round(allowed),
-        percussionDropped,
+        drums: `${percussion?.ours ?? 0}/${percussion?.theirs ?? 0}`,
         note: ok
-          ? percussionDropped > 0
-            ? `${percussionDropped} percussion notes not carried`
-            : ""
+          ? drumsOk
+            ? ""
+            : `drum voices differ: ${(drumsMissing ?? []).slice(0, 8).join(" ")}`
           : `notes off by ${noteDrift} (allowed ${Math.round(allowed)}), length off by ${lengthDrift}/48q` +
             `${missing?.length ? `, missing ${missing.slice(0, 6).join(" ")}` : ""}` +
             `${extra?.length ? `, extra ${extra.slice(0, 6).join(" ")}` : ""}`,
@@ -168,7 +158,7 @@ async function main() {
     }
 
     console.log("");
-    console.log("SCORE".padEnd(36) + "OK  OURS    THEIRS  NOTEΔ  LENΔ   ALLOWED  NOTE");
+    console.log("SCORE".padEnd(36) + "OK  OURS    THEIRS  NOTEΔ  LENΔ   ALLOWED  DRUMS      NOTE");
     console.log("-".repeat(112));
     for (const r of rows) {
       console.log(
@@ -179,6 +169,7 @@ async function main() {
           String(r.noteDrift ?? "-").padEnd(7) +
           String(r.lengthDrift ?? "-").padEnd(7) +
           String(r.allowed ?? "-").padEnd(9) +
+          String(r.drums ?? "-").padEnd(11) +
           r.note,
       );
     }

@@ -355,11 +355,13 @@ describe("articulations", () => {
     );
   });
 
-  it("reports a drum track as not carried, and writes no channel-10 notes", () => {
+  it("writes an empty drum track without inventing hits", () => {
+    // Drums are carried now — see the percussion suite below for the behaviour.
+    // What a drum track with no notes in it must not do is produce any.
     const drums = createTrack("Kit", { kind: "drums" }, 4);
     const score: Score = { ...createScore("Drums"), tracks: [drums] };
     const { report, parsed } = roundTrip(score);
-    expect(report.unsupported.some((u) => u.includes("percussion"))).toBe(true);
+    expect(report.noteCount).toBe(0);
     expect(parsed.hasPercussion).toBe(false);
   });
 });
@@ -544,5 +546,103 @@ describe("held notes never overrun the next of the same pitch", () => {
     const { parsed } = roundTrip(held);
     const low = parsed.notes.find((n) => n.key === 69);
     expect(low?.durationTicks).toBeGreaterThan(QUARTER_TICKS);
+  });
+});
+
+describe("percussion", () => {
+  /** A drum track: voices are General MIDI drum numbers in `pitch`. */
+  function kit(voices: number[][]): Score {
+    const bars = [
+      {
+        id: "drum-bar",
+        voices: [
+          {
+            id: "drum-voice",
+            beats: voices.map((chord, i) => ({
+              id: `drum-beat-${i}`,
+              duration: duration(4),
+              notes: chord.map((v, j) => ({ id: `drum-note-${i}-${j}`, pitch: v, articulations: [] })),
+              dots: 0 as const,
+            })),
+          },
+        ],
+      },
+    ];
+    return {
+      ...createScore("Kit"),
+      tracks: [{ id: "t-drums", name: "Kit", instrument: { kind: "drums" }, bars }],
+    };
+  }
+
+  it("writes drum voices on channel 10, which the specification reserves for them", () => {
+    const { parsed } = roundTrip(kit([[36], [38], [42], [38]]));
+    expect(parsed.notes).toHaveLength(4);
+    expect(parsed.notes.every((n) => n.channel === 9)).toBe(true);
+    expect(parsed.hasPercussion).toBe(true);
+  });
+
+  it("writes the drum voice as the key, unchanged", () => {
+    const { parsed } = roundTrip(kit([[36], [38], [42], [49]]));
+    expect(parsed.notes.map((n) => n.key).sort((a, b) => a - b)).toEqual([36, 38, 42, 49]);
+  });
+
+  it("sends no program change on the drum channel", () => {
+    // The kit is implied by the channel. A program change there makes some synths
+    // substitute a melodic instrument, and then the drums play as a piano.
+    const { parsed } = roundTrip(kit([[36], [38]]));
+    expect(parsed.programs.filter((p) => p.channel === 9)).toEqual([]);
+  });
+
+  it("sounds a kick and a hat together as one beat", () => {
+    const { parsed } = roundTrip(kit([[36, 42], [38, 42]]));
+    expect(parsed.notes).toHaveLength(4);
+    expect(new Set(parsed.notes.map((n) => n.startTicks)).size).toBe(2);
+  });
+
+  it("gates a drum hit short rather than holding it for its written duration", () => {
+    // A drum voice is a hit: its length is the sample's decay, not something the
+    // score decides. A kick does not get longer because it was written as a whole
+    // note, and consecutive hits on one voice must never overlap.
+    // Whole notes, where a gated hit and a held one differ by an order of
+    // magnitude. Quarter notes cannot tell them apart, because the ordinary
+    // end-just-before-the-next clamp already keeps those under a beat — an earlier
+    // version of this test passed with the gate removed.
+    const whole = kit([[36], [36]]);
+    for (const beat of whole.tracks[0]!.bars[0]!.voices[0]!.beats) beat.duration = duration(1);
+    const { parsed } = roundTrip(whole);
+    expect(parsed.notes).toHaveLength(2);
+    for (const note of parsed.notes) expect(note.durationTicks).toBeLessThanOrEqual(QUARTER_TICKS / 4);
+    // And consecutive hits on one voice still never overlap.
+    const sorted = [...parsed.notes].sort((a, b) => a.startTicks - b.startTicks);
+    expect(sorted[0]!.startTicks + sorted[0]!.durationTicks).toBeLessThan(sorted[1]!.startTicks);
+  });
+
+  it("keeps a drum track off the pitched channels a guitar part is using", () => {
+    const guitar = createScore("Both");
+    const withDrums: Score = {
+      ...guitar,
+      tracks: [
+        ...guitar.tracks,
+        { id: "t-drums", name: "Kit", instrument: { kind: "drums" }, bars: kit([[36], [38]]).tracks[0]!.bars },
+      ],
+    };
+    const beat = withDrums.tracks[0]!.bars[0]!.voices[0]!.beats[0]!;
+    const played = applyBatch(
+      withDrums,
+      batch({ type: "note.insert", beatId: beat.id, note: createNote(40, 6, 0) }),
+    );
+    const { parsed } = roundTrip(played);
+    const drums = parsed.notes.filter((n) => n.channel === 9);
+    const pitched = parsed.notes.filter((n) => n.channel !== 9);
+    expect(drums).toHaveLength(2);
+    expect(pitched).toHaveLength(1);
+    // And the guitar took the first pitched channel, not the one after the drums.
+    expect(pitched[0]?.channel).toBe(0);
+  });
+
+  it("no longer reports percussion as something the export cannot carry", () => {
+    const { report } = toMidi(kit([[36], [38]]));
+    expect(report.unsupported.some((u) => /percussion/i.test(u))).toBe(false);
+    expect(report.noteCount).toBe(2);
   });
 });

@@ -129,12 +129,16 @@ describe("bar-level structure", () => {
 });
 
 describe("what the report tells the user", () => {
-  it("drops a percussion track and says which one", () => {
+  it("carries a percussion track and says which half works", () => {
+    // Drum tracks used to be dropped outright. They are in the model now and go out
+    // to MIDI on channel 10; what they still cannot do is render as notation, and
+    // the report has to say which of the two it means rather than "dropped".
     const { score, report } = convert(
-      `${GUITAR}3.3.4 r.2 r.4\n\\track "Kit"\n\\instrument percussion\n\\articulation defaults\n"Kick (hit)".4 r.2 r.4`,
+      `${GUITAR}3.3.4 5.3.4 | 7.3.4 9.3.4\n\\track "Kit"\n\\staff{score} \\instrument percussion\n\\articulation defaults\n"Kick (hit)".4 r.2 r.4`,
     );
-    expect(score.tracks).toHaveLength(1);
-    expect(report.unsupported.join(" ")).toMatch(/drum track "Kit"/);
+    expect(score.tracks.map((t) => t.instrument.kind)).toContain("drums");
+    expect(score.tracks.map((t) => t.instrument.kind)).toContain("fretted");
+    expect(report.unsupported.some((u) => /drum track .*MIDI.*not editable/.test(u))).toBe(true);
   });
 
   /**
@@ -167,15 +171,18 @@ describe("what the report tells the user", () => {
 });
 
 describe("degenerate input", () => {
-  it("survives a score whose only track is percussion", () => {
+  it("carries a score whose only track is percussion, with nothing renderable in it", () => {
     const { score, report } = convert(
       `\\track "Kit"\n\\instrument percussion\n\\articulation defaults\n"Kick (hit)".4 r.2 r.4`,
     );
-    // Nothing editable came out, and the report says why. The UI must not offer
-    // editing for this, which is what report.trackCount === 0 is there to tell it.
-    expect(score.tracks).toHaveLength(0);
-    expect(report.trackCount).toBe(0);
-    expect(report.unsupported.join(" ")).toMatch(/percussion is not editable/);
+    // The drum track is carried now, so `trackCount` alone no longer tells the UI
+    // whether there is anything to edit — a caller has to ask whether any track is
+    // renderable, because alphaTex does not write drum notation. useLibrary does
+    // exactly that, and the e2e suite holds it: EDIT must stay unoffered here.
+    expect(score.tracks).toHaveLength(1);
+    expect(score.tracks[0]?.instrument.kind).toBe("drums");
+    expect(score.tracks.filter((t) => t.instrument.kind !== "drums")).toHaveLength(0);
+    expect(report.unsupported.join(" ")).toMatch(/drum notation is not editable/);
   });
 
   it("gives every entity a distinct id", () => {

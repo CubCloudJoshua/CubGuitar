@@ -86,6 +86,16 @@ function articulationsOf(note: alphaTab.model.Note, ctx: Ctx): Articulation[] {
   return out;
 }
 
+/**
+ * Articulation index to General MIDI drum number, for the track being converted.
+ *
+ * A module-level map because `noteOf` has no reference to the track, and threading
+ * one through every call for the percussion case alone would touch every signature
+ * in this file. Set by `trackOf` before it walks a track's bars and cleared after,
+ * so a note can never read another track's kit.
+ */
+const percussionArticulations = new Map<number, number>();
+
 function noteOf(note: alphaTab.model.Note, stringCount: number, ctx: Ctx): Note {
   ctx.noteCount += 1;
   const out: Note = {
@@ -93,6 +103,28 @@ function noteOf(note: alphaTab.model.Note, stringCount: number, ctx: Ctx): Note 
     pitch: note.realValue,
     articulations: articulationsOf(note, ctx),
   };
+  if (note.isPercussion) {
+    // The drum voice as a General MIDI drum number, which is what alphaTex writes
+    // on a percussion staff and what channel 10 plays.
+    //
+    // `note.percussionArticulation` is an *index* into the track's articulation
+    // list, not that number — reading it directly wrote drum voices 0, 1, 2, 3
+    // where alphaTab plays 35, 38, 42, 49, so the hit count was right and every
+    // sound was wrong. `pnpm midi` caught that on the first run by comparing
+    // channel-10 pitch multisets, which is exactly why it compares them.
+    const articulation = percussionArticulations.get(note.percussionArticulation);
+    out.pitch = articulation ?? note.percussionArticulation;
+    // A track with no articulation list of its own uses alphaTab's built-in GP7
+    // default kit, and for that kit the index *is* the General MIDI drum number —
+    // so the fallback is correct there and needs no warning. Verified rather than
+    // assumed: `pnpm midi` matches our channel-10 output to alphaTab's on a
+    // percussion-only fixture that takes exactly this path. A track that states a
+    // list and then uses an index outside it is the case worth reporting.
+    if (articulation === undefined && percussionArticulations.size > 0) {
+      ctx.unsupported.add("a drum voice outside the track's own articulation list");
+    }
+    return out;
+  }
   if (note.isStringed) {
     // alphaTab numbers strings from the lowest; our model (and alphaTex)
     // number from the highest. Verified against the parser, not assumed:
@@ -205,6 +237,10 @@ function instrumentOf(track: alphaTab.model.Track, staff: alphaTab.model.Staff, 
 }
 
 function trackOf(track: alphaTab.model.Track, ctx: Ctx): Track {
+  percussionArticulations.clear();
+  for (const [index, articulation] of track.percussionArticulations.entries()) {
+    percussionArticulations.set(index, articulation.outputMidiNumber);
+  }
   const staff = track.staves[0];
   if (!staff) {
     return { id: nextId("t"), name: track.name || "Track", instrument: { kind: "drums" }, bars: [] };
@@ -233,16 +269,21 @@ function trackOf(track: alphaTab.model.Track, ctx: Ctx): Track {
 export function fromAlphaTab(source: alphaTab.model.Score): { score: Score; report: ImportReport } {
   const ctx: Ctx = { unsupported: new Set(), noteCount: 0 };
 
-  // Percussion is skipped rather than half-converted: the model stores pitches,
-  // not drum articulations, so anything we produced would be wrong notation.
-  // The imported file still plays faithfully in the player.
-  const percussion = source.tracks.filter((t) => t.staves[0]?.isPercussion);
-  const tracks = source.tracks
-    .filter((t) => !t.staves[0]?.isPercussion)
-    .map((t) => trackOf(t, ctx));
+  // Percussion is carried now. It used to be dropped, on the reasoning that the
+  // model stores pitches and not drum articulations — but a drum voice *is* a
+  // number, and the same number serves all three consumers: alphaTex writes it as
+  // `(38)` on a percussion staff, MIDI writes it as a key on channel 10, and the
+  // model needs no new field. What is still missing is drum *notation editing*,
+  // which is a UI gap rather than a model one.
+  const tracks = source.tracks.map((t) => trackOf(t, ctx));
 
-  for (const drum of percussion) {
-    ctx.unsupported.add(`drum track "${drum.name || "Drums"}" (percussion is not editable yet)`);
+  // Drum tracks are in the model and go out to MIDI on channel 10. What they do not
+  // yet do is render as notation, because alphaTex takes articulation indices rather
+  // than drum numbers — see toAlphaTex. Saying which half works is the point.
+  for (const drum of source.tracks.filter((t) => t.staves[0]?.isPercussion)) {
+    ctx.unsupported.add(
+      `drum track "${drum.name || "Drums"}" (plays and exports to MIDI; drum notation is not editable yet)`,
+    );
   }
   if (source.words || source.music) ctx.unsupported.add("lyrics and credits metadata");
 
@@ -265,7 +306,13 @@ export function fromAlphaTab(source: alphaTab.model.Score): { score: Score; repo
     score,
     report: {
       unsupported: [...ctx.unsupported].sort(),
-      trackCount: tracks.length,
+      // Tracks the *editor* can render, which is what every consumer of this asks:
+      // the banner uses zero to say "this file plays but there is nothing to edit",
+      // and useLibrary uses it to decide whether to offer EDIT at all. Drum tracks
+      // are carried by the model and written to MIDI but not rendered as notation
+      // (see toAlphaTex), so counting them here made a drum-only file claim to be
+      // editable and then open a blank staff.
+      trackCount: tracks.filter((t) => t.instrument.kind !== "drums").length,
       barCount: tracks[0]?.bars.length ?? 0,
       noteCount: ctx.noteCount,
     },

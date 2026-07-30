@@ -112,13 +112,23 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
         try {
           const converted = fromAlphaTab(parsed);
           report = JSON.stringify(converted.report);
-          // No editable tracks means there is nothing to edit — a drum-only
-          // transcription is the realistic case, since percussion is not in the
-          // model yet. Storing a core anyway made EDIT available and then handed
-          // the user a blank guitar staff where their music had been, because the
-          // serializer substitutes a default track for an empty score. The file
-          // still plays, and the notice explains what was dropped.
-          if (converted.score.tracks.length > 0) core = JSON.stringify(converted.score);
+          // Editable means a track the editor can *render*, which is a stricter
+          // test than a track existing. Drum tracks are now carried by the model
+          // and written to MIDI, but alphaTex does not render them (see
+          // toAlphaTex), so a drum-only transcription still has nothing to edit —
+          // and storing a core for it made EDIT available and then handed the user
+          // a blank guitar staff where their music had been, because the serializer
+          // substitutes a default track for a score with nothing it can write.
+          //
+          // This test used to be `tracks.length > 0`, which was the same thing
+          // while percussion was dropped on import and silently stopped being so
+          // the moment it was carried. The file still plays, and the notice
+          // explains what was dropped.
+          // `trackCount` counts renderable tracks, not every track — see
+          // from-alphatab. Drum tracks are carried by the model but alphaTex does
+          // not write them, so a drum-only file has nothing to edit even though it
+          // now has a track.
+          if (converted.report.trackCount > 0) core = JSON.stringify(converted.score);
           // Nothing editable, so the user will never press EDIT and never see the
           // notice that explains why. Say it now, in the player.
           else if (converted.report.unsupported.length > 0) setImportNotice(converted.report);

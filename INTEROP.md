@@ -235,8 +235,14 @@ work. What is missing is presets and naming, not model support.
 Several formats above are blocked on the same three gaps, and they are worth fixing
 before the importers rather than during them.
 
-1. **Percussion.** No instrument kind, so drum tracks are dropped. Blocks GP
-   fidelity, MIDI channel 10, MusicXML percussion parts, and drum tab.
+1. **Percussion.** ~~No instrument kind, so drum tracks are dropped.~~ Half done.
+   Drum tracks are carried by the model and written to MIDI on channel 10, graded
+   against alphaTab's own channel-10 notes by `pnpm midi`. What remains is
+   *notation*: alphaTex takes an articulation index rather than a drum number, and
+   writing all 47 General MIDI voices under `\articulation defaults` gave five
+   sounding notes — voices 35 to 39 — because every index past the end of the
+   default list is silent. The fix is for the tex we generate to declare its own
+   articulation list. Until then a drum-only file stays play-only and says so.
 2. **Chords.** No chord entity, so chord diagrams and chord symbols are dropped.
    Blocks chord charts, Nashville numbers, and a large slice of GP and MusicXML
    fidelity.
