@@ -96,7 +96,16 @@ function articulationsOf(note: alphaTab.model.Note, ctx: Ctx): Articulation[] {
  */
 const percussionArticulations = new Map<number, number>();
 
-function noteOf(note: alphaTab.model.Note, stringCount: number, ctx: Ctx): Note {
+/**
+ * A staff's open-string pitches, highest string first, or empty for an unstringed one.
+ *
+ * Passed down to the note so a clamped fret can be given a pitch that matches it. The
+ * alternative is trusting alphaTab's `realValue`, and for a note whose fret we had to
+ * change that value describes a fingering the model no longer holds.
+ */
+type Strings = readonly number[];
+
+function noteOf(note: alphaTab.model.Note, strings: Strings, ctx: Ctx): Note {
   ctx.noteCount += 1;
   const out: Note = {
     id: nextId("n"),
@@ -129,20 +138,33 @@ function noteOf(note: alphaTab.model.Note, stringCount: number, ctx: Ctx): Note 
     // alphaTab numbers strings from the lowest; our model (and alphaTex)
     // number from the highest. Verified against the parser, not assumed:
     // a 6-string note written on string 6 arrives as string 1.
-    out.string = stringCount + 1 - note.string;
-    // GP3 encodes dead notes at fret -1 (they read back as open-string-1);
-    // frets are never negative in our model.
+    out.string = strings.length + 1 - note.string;
+    // GP3 encodes dead notes at a negative fret; frets are never negative here.
     out.fret = Math.max(0, note.fret);
+    // And when the fret moves, the pitch moves with it, taken from the string rather
+    // than adjusted from alphaTab's own value — for a note whose fret we just changed,
+    // that value describes a fingering the model no longer holds.
+    //
+    // Defensive rather than observed: no file in the corpus takes this branch, so the
+    // clamp above has never actually fired. It is here because the alternative is a
+    // note that says two things — fret 0 on a string whose open pitch is not the note's
+    // pitch, which no fingering produces — and everything downstream then splits by
+    // which half it trusts. Our MIDI writer takes the pitch; a tablature reader and
+    // alphaTab's MusicXML reader take the fret.
+    if (note.fret < 0) {
+      const open = strings[out.string - 1];
+      if (open !== undefined) out.pitch = open + out.fret;
+    }
   }
   if (note.isTieOrigin) out.tiedToNext = true;
   return out;
 }
 
-function beatOf(beat: alphaTab.model.Beat, stringCount: number, ctx: Ctx): Beat {
+function beatOf(beat: alphaTab.model.Beat, strings: Strings, ctx: Ctx): Beat {
   const out: Beat = {
     id: nextId("b"),
     duration: durationOf(beat.duration),
-    notes: beat.isRest ? [] : beat.notes.map((n) => noteOf(n, stringCount, ctx)),
+    notes: beat.isRest ? [] : beat.notes.map((n) => noteOf(n, strings, ctx)),
     dots: (Math.min(2, Math.max(0, beat.dots)) as 0 | 1 | 2),
   };
   if (beat.hasTuplet) {
@@ -153,8 +175,8 @@ function beatOf(beat: alphaTab.model.Beat, stringCount: number, ctx: Ctx): Beat 
   return out;
 }
 
-function voiceOf(voice: alphaTab.model.Voice, stringCount: number, ctx: Ctx): Voice {
-  return { id: nextId("v"), beats: voice.beats.map((b) => beatOf(b, stringCount, ctx)) };
+function voiceOf(voice: alphaTab.model.Voice, strings: Strings, ctx: Ctx): Voice {
+  return { id: nextId("v"), beats: voice.beats.map((b) => beatOf(b, strings, ctx)) };
 }
 
 function keySignatureOf(master: alphaTab.model.MasterBar): KeySignature {
@@ -167,14 +189,14 @@ function keySignatureOf(master: alphaTab.model.MasterBar): KeySignature {
 function barOf(
   bar: alphaTab.model.Bar,
   previous: alphaTab.model.MasterBar | null,
-  stringCount: number,
+  strings: Strings,
   ctx: Ctx,
 ): Bar {
   const master = bar.masterBar;
   const out: Bar = {
     id: nextId("m"),
     // Empty voices would serialize to nothing, so keep only ones with beats.
-    voices: bar.voices.filter((v) => v.beats.length > 0).map((v) => voiceOf(v, stringCount, ctx)),
+    voices: bar.voices.filter((v) => v.beats.length > 0).map((v) => voiceOf(v, strings, ctx)),
   };
 
   if (out.voices.length === 0) {
@@ -249,11 +271,11 @@ function trackOf(track: alphaTab.model.Track, ctx: Ctx): Track {
     ctx.unsupported.add(`extra staves on "${track.name}" (only the first is imported)`);
   }
 
-  const stringCount = staff.stringTuning.tunings.length;
+  const strings: Strings = staff.stringTuning.tunings;
   const bars: Bar[] = [];
   let previousMaster: alphaTab.model.MasterBar | null = null;
   for (const bar of staff.bars) {
-    bars.push(barOf(bar, previousMaster, stringCount, ctx));
+    bars.push(barOf(bar, previousMaster, strings, ctx));
     previousMaster = bar.masterBar;
   }
 

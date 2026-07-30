@@ -70,6 +70,40 @@ export interface RampConfig {
 
 const DEFAULT_RAMP: RampConfig = { enabled: false, step: 0.05, max: 1 };
 
+const SOUND_FONT = "/soundfont/sonivox.sf3";
+/**
+ * Players that have already asked for the soundfont.
+ *
+ * Per player rather than per page: a module-level boolean would mean a remounted
+ * renderer never got one, and the failure mode is silent playback rather than an
+ * error, which is the worst kind. Weak so a discarded player is collectable.
+ */
+const soundFontArmed = new WeakSet<alphaTab.AlphaTabApi>();
+
+/**
+ * Fetches the soundfont once the score is on screen.
+ *
+ * Not at boot, because a cold load was four roughly equal quarters — the notation
+ * font, the renderer, the player's worker and the soundfont, 1,263 KB between them —
+ * and the soundfont is the only one of the four that nothing on screen is waiting
+ * for. Reading a tab needs the first three; hearing it needs all four, and hearing it
+ * cannot happen before the score has rendered and a human has reached for the
+ * spacebar.
+ *
+ * On an idle callback so it does not compete with the layout work that follows a
+ * render, with a timeout so a busy page still gets it promptly: a soundfont that
+ * arrives after the user presses play is a worse bug than the one this fixes.
+ */
+function armSoundFont(api: alphaTab.AlphaTabApi): void {
+  if (soundFontArmed.has(api)) return;
+  soundFontArmed.add(api);
+  const load = () => api.loadSoundFont(SOUND_FONT, false);
+  const idle = (globalThis as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void })
+    .requestIdleCallback;
+  if (idle) idle(load, { timeout: 500 });
+  else setTimeout(load, 0);
+}
+
 export function useAlphaTab() {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const apiRef = useRef<alphaTab.AlphaTabApi | null>(null);
@@ -108,7 +142,12 @@ export function useAlphaTab() {
       },
       player: {
         playerMode: alphaTab.PlayerMode.EnabledAutomatic,
-        soundFont: "/soundfont/sonivox.sf3",
+        // No soundFont here on purpose. Stating it in the initial settings makes
+        // alphaTab fetch it during boot, and measurement said that cost more than it
+        // looked: of 1,263 KB on a cold load, 296 KB was a soundfont competing for
+        // bandwidth with the font and the renderer needed to put the score on screen.
+        // Nobody can press play before the score exists, so it is loaded once the
+        // first render is done. See `armSoundFont` below.
         scrollMode: alphaTab.ScrollMode.Continuous,
         enableCursor: true,
         enableUserInteraction: true,
@@ -150,6 +189,7 @@ export function useAlphaTab() {
     });
     api.postRenderFinished.on(() => {
       setRendering(false);
+      armSoundFont(api);
       const lookup = api.renderer.boundsLookup;
       if (!lookup) return;
       // One entry per master bar. A bar that appears in several staff systems

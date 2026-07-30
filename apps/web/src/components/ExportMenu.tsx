@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, color, font, typeScale } from "@cubscore/design";
-import { exportAscii, exportGp, exportMidi, exportTex, printPdf } from "../export";
+import { exportAscii, exportGp, exportMidi, exportMusicXml, exportTex, printPdf } from "../export";
 import type { AlphaTabController } from "../useAlphaTab";
 import type { Score as CoreScore } from "@cubscore/core";
 
@@ -39,9 +39,14 @@ export function ExportMenu({
     ["alphaTex (.altex)", () => { const s = c.getScore(); if (s) exportTex(s); }],
     // Ours when the editor owns the document; alphaTab's otherwise.
     ["MIDI (.mid)", () => { if (score) exportMidi(score); else c.getApi()?.downloadMidi(); }],
-    // Only when the editor owns the document: ASCII tab is written from the model,
-    // and an imported file opened in the player has none.
-    ...(score ? [["ASCII tab (.txt, copied)", () => void exportAscii(score)] as [string, () => void]] : []),
+    // Only when the editor owns the document: these are written from the model, and
+    // an imported file opened in the player has none.
+    ...(score
+      ? ([
+          ["MusicXML (.musicxml)", () => exportMusicXml(score)],
+          ["ASCII tab (.txt, copied)", () => void exportAscii(score)],
+        ] as Array<[string, () => void]>)
+      : []),
     ["Print / PDF", () => { const api = c.getApi(); if (api) printPdf(api); }],
   ];
 

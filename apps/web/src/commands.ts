@@ -8,7 +8,7 @@ import type { AlphaTabController } from "./useAlphaTab";
 import type { EditorController } from "./editor/useEditor";
 import type { LibraryController } from "./library/useLibrary";
 import type { CollabController } from "./collab/useCollab";
-import { exportAscii, exportGp, exportMidi, exportTex, printPdf } from "./export";
+import { exportAscii, exportGp, exportMidi, exportMusicXml, exportTex, printPdf } from "./export";
 
 interface CommandDeps {
   c: AlphaTabController;
@@ -89,6 +89,9 @@ export function useCommands(deps: CommandDeps): Command[] {
       add({ id: "export-midi", title: "Export MIDI", section: "Export", run: () => { if (editing) exportMidi(editor.score); else c.getApi()?.downloadMidi(); } });
       add({ id: "export-tex", title: "Export alphaTex", section: "Export", run: () => { const s = c.getScore(); if (s) exportTex(s); } });
       if (editing) {
+        // The format every other notation program reads, which makes it the way a part
+        // leaves here for an arranger, a teacher or a school's existing software.
+        add({ id: "export-musicxml", title: "Export MusicXML", section: "Export", run: () => exportMusicXml(editor.score) });
         add({ id: "export-ascii", title: "Copy as ASCII tab", section: "Export", run: () => void exportAscii(editor.score) });
       }
       add({ id: "export-pdf", title: "Print / PDF", section: "Export", run: () => { const api = c.getApi(); if (api) printPdf(api); } });

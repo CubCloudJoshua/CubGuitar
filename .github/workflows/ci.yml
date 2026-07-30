@@ -60,8 +60,14 @@ jobs:
       # note-ons — 1,616 extra note events in one nine-minute file.
       - name: MIDI export agrees with alphaTab
         run: pnpm midi
+      # Our MusicXML handed to alphaTab's own MusicXML reader. Same argument as the
+      # step above, plus the one claim about guitar MusicXML that most exporters
+      # quietly fail: it counts how many notes came back still carrying a string and
+      # a fret rather than as pitches somebody has to finger again.
+      - name: MusicXML agrees with alphaTab
+        run: pnpm musicxml
 
-      # Drives the built app in a real browser across thirteen journeys, standing
-      # up the API and sync services against a throwaway data directory.
+      # Drives the built app in a real browser across every journey, standing up the
+      # API and sync services against a throwaway data directory.
       - name: End-to-end suites
         run: pnpm e2e

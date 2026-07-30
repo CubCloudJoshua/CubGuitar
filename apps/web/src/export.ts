@@ -9,7 +9,7 @@
  */
 import * as alphaTab from "@coderline/alphatab";
 import type { Score as CoreScore } from "@cubscore/core";
-import { toAscii, toMidi } from "@cubscore/formats";
+import { toAscii, toMidi, toMusicXml } from "@cubscore/formats";
 
 function download(data: Uint8Array, fileName: string, mime: string) {
   // Copy into a plain ArrayBuffer: alphaTab's Uint8Array may be backed by a
@@ -55,6 +55,21 @@ export function exportTex(score: alphaTab.model.Score): void {
 export function exportMidi(score: CoreScore): { unsupported: string[] } {
   const { bytes, report } = toMidi(score);
   download(bytes, `${baseName(score.title)}.mid`, "audio/midi");
+  return { unsupported: report.unsupported };
+}
+
+/**
+ * MusicXML, with a report of what the format could not carry.
+ *
+ * The file every other notation program reads, which makes this the export that gets a
+ * part out of CubScore and into whatever a collaborator, an arranger or a school
+ * already owns. Written from the semantic model with the tuning and every note's string
+ * and fret, so a guitar part arrives as tablature rather than as pitches somebody has
+ * to finger again.
+ */
+export function exportMusicXml(score: CoreScore): { unsupported: string[] } {
+  const { text, report } = toMusicXml(score);
+  download(new TextEncoder().encode(text), `${baseName(score.title)}.musicxml`, "application/vnd.recordare.musicxml+xml");
   return { unsupported: report.unsupported };
 }
 

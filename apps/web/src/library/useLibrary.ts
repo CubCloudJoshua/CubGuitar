@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toAlphaTex, type Score as CoreScore } from "@cubscore/core";
-import { fromAlphaTab, fromAscii, type ImportReport } from "@cubscore/formats";
+import { fromAlphaTab, fromAscii, fromMusicXml, type ImportReport } from "@cubscore/formats";
 import type { AlphaTabController } from "../useAlphaTab";
 import type { EditorController } from "../editor/useEditor";
 import { deleteEntry, getEntry, libraryOwner, listEntries, newId, putEntry, type LibraryEntry } from "./db";
@@ -401,6 +401,60 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
         const tex = toAlphaTex(score);
         pendingRef.current = { id: newId(), format: "altex", bytes: null, tex, fileName: file.name, addedAt: Date.now() };
         loadTex(tex);
+        setLibraryOpen(false);
+        return;
+      }
+
+      /**
+       * MusicXML, read by us rather than by alphaTab.
+       *
+       * alphaTab parses MusicXML too, and handing it the bytes would be less code. It
+       * would also mean the user never learns what the import dropped, and that our own
+       * reader — the one STANDALONE.md's plan depends on — is never the thing that runs.
+       * So the file goes through `fromMusicXml` and then down the same alphaTex path as
+       * an ASCII import: it plays, autosaves and becomes editable with no new machinery,
+       * and the notice says what could not be carried.
+       *
+       * A .mxl is a zip and stays with alphaTab, which can unpack one. So does a file
+       * our reader parsed and found empty, since its content may be in a form alphaTab
+       * understands. A file our reader *refuses* stops here: we already know it is not a
+       * partwise MusicXML score, the message says which, and handing it on produced a
+       * second failure in the console and no better outcome.
+       */
+      if (/\.(xml|musicxml)$/i.test(file.name)) {
+        const text = await file.text();
+        try {
+          const { score, report } = fromMusicXml(text);
+          if (report.noteCount > 0) {
+            setImportNotice({
+              unsupported: report.unsupported,
+              trackCount: report.trackCount,
+              barCount: report.barCount,
+              noteCount: report.noteCount,
+            });
+            const tex = toAlphaTex(score);
+            pendingRef.current = { id: newId(), format: "altex", bytes: null, tex, fileName: file.name, addedAt: Date.now() };
+            loadTex(tex);
+            setLibraryOpen(false);
+            return;
+          }
+          // Parsed, and empty: a part list with no notes, or a file whose content is
+          // all in a form the model cannot hold. alphaTab gets a turn before we
+          // conclude there is nothing here.
+        } catch (cause) {
+          // Not MusicXML, timewise, or malformed. The message names which, and the
+          // score the user was looking at stays where it is.
+          setImportNotice({
+            unsupported: [cause instanceof Error ? cause.message : "This file could not be read as MusicXML."],
+            trackCount: 0,
+            barCount: 0,
+            noteCount: 0,
+          });
+          return;
+        }
+        const bytes = await file.arrayBuffer();
+        pendingRef.current = { id: newId(), format: "gp", bytes, tex: null, fileName: file.name, addedAt: Date.now() };
+        loadBytes(bytes);
         setLibraryOpen(false);
         return;
       }

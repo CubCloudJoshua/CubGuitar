@@ -20,7 +20,7 @@ import {
   type Score,
   timeline,
 } from "@cubscore/core";
-import { fromAlphaTab, parseMidi, toMidi } from "@cubscore/formats";
+import { fromAlphaTab, fromMusicXml, parseMidi, toMidi, toMusicXml } from "@cubscore/formats";
 
 export interface LoadResult {
   ok: boolean;
@@ -47,6 +47,44 @@ export interface RoundTripResult {
   pitchDrift?: { missing: number[]; added: number[] };
   unsupported?: string[];
   tex?: string;
+}
+
+/**
+ * Our MusicXML, read by somebody else.
+ *
+ * A writer and a reader we both wrote agree with each other by construction, so the
+ * MusicXML round trip in packages/formats proves only that the pair is
+ * self-consistent. This is the independent judge: our file is handed to alphaTab's own
+ * MusicXML importer, and what it finds is compared against what it found in the
+ * original. A mistake both halves of our pair make survives the unit tests and dies
+ * here.
+ *
+ * Also runs our own reader over the same file, so the two readings can be compared to
+ * each other rather than only to the source. Where they disagree, one of us is wrong
+ * and the disagreement says where to look.
+ */
+export interface MusicXmlCompareResult {
+  ok: boolean;
+  error?: string;
+  original?: Stats;
+  /** alphaTab's reading of the MusicXML we wrote. */
+  theirs?: Stats;
+  /** Our own reading of the same file. */
+  ours?: Stats;
+  pitchDrift?: { missing: number[]; added: number[] };
+  /**
+   * Notes alphaTab found that we did not, and the reverse.
+   *
+   * Compared over *every* note including dead ones, because alphaTab's MusicXML reader
+   * has no concept of a dead note and returns them as ordinary pitches. Comparing our
+   * dead-excluded multiset against its dead-included one reports a disagreement on
+   * every muted strum in the file and says nothing about either reader.
+   */
+  readerDrift?: { missing: number[]; added: number[] };
+  unsupported?: string[];
+  /** Strings and frets alphaTab kept, which is the tablature claim. */
+  fretted?: { theirs: number; ours: number };
+  xml?: string;
 }
 
 /**
@@ -90,6 +128,8 @@ declare global {
       timingBytes(bytes: number[]): Promise<TimingResult>;
       midiTex(tex: string): Promise<MidiCompareResult>;
       midiBytes(bytes: number[]): Promise<MidiCompareResult>;
+      musicXmlTex(tex: string): Promise<MusicXmlCompareResult>;
+      musicXmlBytes(bytes: number[]): Promise<MusicXmlCompareResult>;
     };
   }
 }
@@ -152,12 +192,22 @@ export interface Stats {
   tracks: number;
   bars: number;
   notes: number;
+  /**
+   * Dead notes, counted separately because they are excluded from `notes`.
+   *
+   * A dead note is unpitched and GP3 encodes it at a nonsense fret, so comparing its
+   * pitch measures a format quirk. But it is still a note in the file, and a format
+   * that cannot carry it drops a real event — MusicXML has no dead note and alphaTab's
+   * MusicXML reader has no concept of one, so this is the number that says how many.
+   */
+  dead: number;
   /** Sorted MIDI pitches, so a wrong tuning shows up even when counts match. */
   pitches: number[];
 }
 
 function collect(score: alphaTab.model.Score, skipPercussion: boolean): Stats {
   const pitches: number[] = [];
+  let dead = 0;
   for (const track of score.tracks) {
     for (const staff of track.staves) {
       if (skipPercussion && staff.isPercussion) continue;
@@ -169,7 +219,10 @@ function collect(score: alphaTab.model.Score, skipPercussion: boolean): Stats {
               // open-string-1 (fret -1), so comparing their "pitch" measures
               // a format quirk rather than musical content. Their placement
               // fidelity is covered by fret-preserving serialization.
-              if (note.isDead) continue;
+              if (note.isDead) {
+                dead += 1;
+                continue;
+              }
               // Harmonics compare by fretted pitch: the model keeps the
               // harmonic flag but not the exact harmonic pitch math, which
               // the importer reports as simplified.
@@ -189,6 +242,7 @@ function collect(score: alphaTab.model.Score, skipPercussion: boolean): Stats {
     tracks: score.tracks.length,
     bars: score.masterBars.length,
     notes: pitches.length,
+    dead,
     pitches,
   };
 }
@@ -359,6 +413,122 @@ async function roundTrip(trigger: () => void): Promise<RoundTripResult> {
     pitchDrift: diffPitches(original.pitches, converted.pitches),
     unsupported,
     tex,
+  };
+}
+
+async function compareMusicXml(trigger: () => void): Promise<MusicXmlCompareResult> {
+  const first = await run(trigger);
+  if (!first.ok) return { ok: false, error: first.error ?? "source failed to load" };
+  const source = api.score;
+  if (!source) return { ok: false, error: "no score after load" };
+  // Percussion counted, unlike the alphaTex round trip: our MusicXML writes a drum
+  // part as pitched notes rather than dropping it, so excluding percussion from the
+  // baseline while including it in the file under test compares 24 notes against 47
+  // and calls a working exporter broken.
+  const original = collect(source, false);
+  original.tracks = source.tracks.length;
+
+  let xml: string;
+  let unsupported: string[];
+  let ours: Stats;
+  let ourEveryPitch: number[] = [];
+  try {
+    const converted = fromAlphaTab(source);
+    const written = toMusicXml(converted.score);
+    xml = written.text;
+    const reread = fromMusicXml(xml);
+    unsupported = [...new Set([...written.report.unsupported, ...reread.report.unsupported])].sort();
+    const pitches: number[] = [];
+    /** Every pitch including dead notes, for the reader-against-reader comparison. */
+    const everyPitch: number[] = [];
+    let notes = 0;
+    let dead = 0;
+    let bars = 0;
+    for (const track of reread.score.tracks) {
+      bars = Math.max(bars, track.bars.length);
+      const tuning = track.instrument.kind === "fretted" ? track.instrument.tuning : [];
+      for (const bar of track.bars) {
+        for (const voice of bar.voices) {
+          for (const beat of voice.beats) {
+            for (const note of beat.notes) {
+              // Harmonics compare by fretted pitch, the same choice `collect` makes on
+              // alphaTab's side and for the same reason: the model keeps the harmonic
+              // flag and the sounding pitch, alphaTab reports the stopped pitch, and
+              // comparing one against the other reports a disagreement on every
+              // harmonic in the file while saying nothing about either reader.
+              const harmonic =
+                note.articulations.includes("naturalHarmonic") ||
+                note.articulations.includes("artificialHarmonic");
+              const open = note.string === undefined ? undefined : tuning[note.string - 1];
+              const stopped =
+                harmonic && open !== undefined && note.fret !== undefined ? open + note.fret : note.pitch;
+              everyPitch.push(stopped);
+              // Counted the way `collect` counts alphaTab's side, or the two numbers
+              // are not comparable: dead notes out of the pitch multiset, into their
+              // own total.
+              if (note.articulations.includes("deadNote")) {
+                dead += 1;
+                continue;
+              }
+              notes += 1;
+              pitches.push(stopped);
+            }
+          }
+        }
+      }
+    }
+    ours = { tracks: reread.score.tracks.length, bars, notes, dead, pitches: pitches.sort((a, b) => a - b) };
+    ourEveryPitch = everyPitch.sort((a, b) => a - b);
+  } catch (e) {
+    return { ok: false, error: `conversion threw: ${e instanceof Error ? e.message : String(e)}`, original };
+  }
+
+  const bytes = new TextEncoder().encode(xml);
+  const second = await run(() => api.load(bytes));
+  if (!second.ok) {
+    return { ok: false, error: `alphaTab refused our MusicXML: ${second.error ?? "?"}`, original, ours, unsupported, xml };
+  }
+  const after = api.score;
+  if (!after) return { ok: false, error: "no score after reload", original, ours, unsupported, xml };
+  const theirs = collect(after, true);
+
+  // How many notes came back with a string and a fret, on each side. Every MusicXML
+  // exporter claims guitar support; keeping the fingering is what separates the ones
+  // that mean it, and this is the number that says whether we did.
+  let theirFretted = 0;
+  for (const track of after.tracks) {
+    for (const stave of track.staves) {
+      for (const bar of stave.bars) {
+        for (const voice of bar.voices) {
+          for (const beat of voice.beats) {
+            for (const note of beat.notes) if (note.string > 0 && note.fret >= 0) theirFretted += 1;
+          }
+        }
+      }
+    }
+  }
+  let ourFretted = 0;
+  const reread = fromMusicXml(xml);
+  for (const track of reread.score.tracks) {
+    for (const bar of track.bars) {
+      for (const voice of bar.voices) {
+        for (const beat of voice.beats) {
+          for (const note of beat.notes) if (note.string !== undefined && note.fret !== undefined) ourFretted += 1;
+        }
+      }
+    }
+  }
+
+  return {
+    ok: true,
+    original,
+    theirs,
+    ours,
+    pitchDrift: diffPitches(original.pitches, theirs.pitches),
+    readerDrift: diffPitches(theirs.pitches, ourEveryPitch),
+    unsupported,
+    fretted: { theirs: theirFretted, ours: ourFretted },
+    xml,
   };
 }
 
@@ -573,6 +743,8 @@ window.cubscore = {
   // Bytes cross the CDP boundary as a plain array.
   loadBytes: (bytes) => run(() => api.load(new Uint8Array(bytes))),
   roundTripTex: (tex) => roundTrip(() => api.tex(tex)),
+  musicXmlTex: (tex) => compareMusicXml(() => api.tex(tex)),
+  musicXmlBytes: (bytes) => compareMusicXml(() => api.load(new Uint8Array(bytes))),
   // Bar-level detail, for diagnosing where a round trip drifts.
   describeTex: async (tex) => {
     const result = await run(() => api.tex(tex));

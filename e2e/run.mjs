@@ -27,7 +27,7 @@ const SYNC_PORT = Number(process.env.E2E_SYNC_PORT ?? 8798);
 const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 4399);
 const BASE_URL = `http://localhost:${WEB_PORT}/`;
 
-const SUITES = ["editor", "tracks", "palette", "responsive", "import-safety", "pitched-staff", "perform", "fretboard", "ascii-tab", "share-save", "collab", "accounts", "shared-device", "listening"];
+const SUITES = ["editor", "tracks", "palette", "responsive", "import-safety", "pitched-staff", "perform", "fretboard", "ascii-tab", "musicxml", "share-save", "collab", "accounts", "shared-device", "listening"];
 
 const children = [];
 let dataDir;
