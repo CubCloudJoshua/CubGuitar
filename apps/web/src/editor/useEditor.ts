@@ -1,6 +1,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
   applyBatch,
+  arrangeForFretted,
   beginSession,
   beatTicks,
   createBar,
@@ -24,6 +25,7 @@ import {
   type Op,
   type OpBatch,
   type OpKind,
+  type Instrument,
   type Score,
   type Session,
 } from "@cubscore/core";
@@ -253,6 +255,25 @@ export function useEditor() {
       publish({ ...prev, live: on ? beginSession(prev.score) : null });
     },
     [publish],
+  );
+
+  /**
+   * Arranges the caret's track for a fretted instrument, as one edit.
+   *
+   * One batch, so it is one undo step and one thing for collaborators to receive
+   * rather than several hundred. The report goes back to the caller to show, because
+   * an arrangement that transposed a part or dropped an unreachable note has to say
+   * so — the alternative is a user wondering why their piano line moved.
+   */
+  const arrangeTrack = useCallback(
+    (instrument: Instrument = frettedGuitar()) => {
+      const prev = stateRef.current;
+      const { ops, report } = arrangeForFretted(prev.score, cursor.track, instrument);
+      if (ops.length === 0) return report;
+      commit(ops.map(op), `Arrange for ${instrument.kind === "fretted" ? "guitar" : "instrument"}`);
+      return report;
+    },
+    [commit, cursor.track],
   );
 
   const setCommitListener = useCallback((listener: ((batch: OpBatch) => void) | null) => {
@@ -536,6 +557,7 @@ export function useEditor() {
     renameTrack,
     moveBeat,
     moveString,
+    arrangeTrack,
     undo,
     redo,
     applyRemote,

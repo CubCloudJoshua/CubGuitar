@@ -144,16 +144,19 @@ statement we can make and they cannot.
 
 ---
 
-## 5. Arrangement as an operation, with undo
+## 5. Arrangement as an operation, with undo — **first item shipped**
 
 Because arranging is a transformation of the semantic model, and every
 transformation of the model is already an op batch, these are all *undoable* and
 *collaborative* for free:
 
-- **Arrange this for guitar.** A piano or vocal part becomes playable tablature.
-  `fingerSequence` already does the hard part; the fretboard reader already
-  demonstrates it on screen. The remaining work is a `track.setInstrument` op and a
-  batch of fingering ops.
+- ~~**Arrange this for guitar.**~~ **Shipped** (`packages/core/src/arrange.ts`). A
+  piano or vocal part becomes playable tablature, in the command palette, for guitar
+  or bass. A part outside the instrument's range is shifted by octaves rather than
+  abandoned — pitch classes survive, so the harmony does — and a note nothing can
+  reach is removed and reported rather than left as a pitch the editor cannot show.
+  The whole arrangement is one op batch, so it is one undo step. That is the feature:
+  not the algorithm, but being able to press Ctrl+Z afterwards.
 - **Find me a capo position.** Transpose and re-finger so the shapes are easier,
   reporting what it cost. A guitarist's actual question, and nobody answers it.
 - **Simplify this.** Reduce a part to something a beginner can play, keeping the

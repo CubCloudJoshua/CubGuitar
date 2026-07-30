@@ -24,6 +24,8 @@ interface CommandDeps {
   openFilePicker: () => void;
   toggleAccount: () => void;
   startPerforming: () => void;
+  /** Arranges the caret's staff for a fretted instrument; see core/arrange. */
+  onArrange: (kind: "guitar" | "bass") => void;
   /** Runs an action that changes which document is open. See App.tsx. */
   switchDocument: (open: () => void) => void;
 }
@@ -105,6 +107,24 @@ export function useCommands(deps: CommandDeps): Command[] {
         add({ id: "remove-track", title: "Remove active track", section: "Edit", run: editor.removeTrack });
       }
       add({ id: "add-bar", title: "Add bar", section: "Edit", hint: "Enter", run: editor.addBar });
+      // Arranging a part for a fretted instrument. Offered only for a staff that is
+      // not already one — the interesting case is a piano or vocal line, which is
+      // read-only in this editor precisely because it has no strings to type frets
+      // on. This is the way to give it some.
+      if (editor.score.tracks[editor.cursor.track]?.instrument.kind === "pitched") {
+        add({
+          id: "arrange-guitar",
+          title: "Arrange this staff for guitar",
+          section: "Edit",
+          run: () => deps.onArrange("guitar"),
+        });
+        add({
+          id: "arrange-bass",
+          title: "Arrange this staff for bass",
+          section: "Edit",
+          run: () => deps.onArrange("bass"),
+        });
+      }
       // Offered during a live session too: undo sends the inverse of this
       // client's own edit through the server, so it converges like any batch.
       add({ id: "undo", title: "Undo", section: "Edit", hint: "Cmd+Z", run: editor.undo });

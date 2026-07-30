@@ -14,7 +14,7 @@
  * pointless re-renders. Every case below therefore compares before rebuilding.
  * See convergence.test.ts.
  */
-import type { Bar, Beat, Note, Score, Track, Voice } from "./score.js";
+import type { Bar, Beat, Instrument, Note, Score, Track, Voice } from "./score.js";
 import type { Op, OpBatch } from "./ops.js";
 
 type Mapper<T> = (value: T) => T;
@@ -87,6 +87,27 @@ function sameNotes(a: readonly Note[], b: readonly Note[]): boolean {
   return a.length === b.length && a.every((note, i) => note === b[i] || sameNote(note, b[i]!));
 }
 
+/**
+ * Whether two instruments are the same, so setting one that is already there
+ * returns the same reference like every other op.
+ *
+ * Structural rather than by reference, because an instrument arriving over the
+ * socket is fresh JSON — the same reason `sameNote` exists.
+ */
+function sameInstrument(a: Instrument, b: Instrument): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "fretted" && b.kind === "fretted") {
+    return (
+      a.frets === b.frets &&
+      a.capo === b.capo &&
+      a.tuning.length === b.tuning.length &&
+      a.tuning.every((pitch, i) => pitch === b.tuning[i])
+    );
+  }
+  if (a.kind === "pitched" && b.kind === "pitched") return a.midiProgram === b.midiProgram;
+  return true;
+}
+
 function withBeat(score: Score, beatId: string, fn: Mapper<Beat>): Score {
   return mapBeats(score, (beat) => (beat.id === beatId ? fn(beat) : beat));
 }
@@ -123,6 +144,13 @@ export function applyOp(score: Score, op: Op): Score {
     case "track.rename":
       return mapTracks(score, (t) =>
         t.id === op.trackId && t.name !== op.name ? { ...t, name: op.name } : t,
+      );
+
+    case "track.setInstrument":
+      return mapTracks(score, (t) =>
+        t.id === op.trackId && !sameInstrument(t.instrument, op.instrument)
+          ? { ...t, instrument: op.instrument }
+          : t,
       );
 
     case "bar.insert":
@@ -197,7 +225,17 @@ export function applyOp(score: Score, op: Op): Score {
     case "note.insert":
       return withBeat(score, op.beatId, (b) => {
         // One note per string: entering a fret replaces what was there.
-        const kept = b.notes.filter((n) => n.string !== op.note.string);
+        //
+        // Only when the note *has* a string. A note without one is a pitch on a
+        // staff that has no strings — a piano or vocal part — and two of those are
+        // a chord, not a collision. Filtering on `undefined !== undefined` made
+        // every insert into such a beat replace the last one, so a pitched staff
+        // could hold exactly one note however many were inserted. Nothing hit it
+        // yet because the importer builds those beats directly rather than through
+        // ops; MIDI and MusicXML import will go through ops, and would have lost
+        // every chord in a piano part.
+        const kept =
+          op.note.string === undefined ? b.notes : b.notes.filter((n) => n.string !== op.note.string);
         // Note entry appends; undo supplies an index to put a displaced note
         // back where it was, so a chord keeps the order it had.
         const at = op.index === undefined ? kept.length : Math.max(0, Math.min(op.index, kept.length));
@@ -215,9 +253,17 @@ export function applyOp(score: Score, op: Op): Score {
       return withNote(score, op.noteId, (n) => (n.pitch === op.pitch ? n : { ...n, pitch: op.pitch }));
 
     case "note.setFingering":
-      return withNote(score, op.noteId, (n) =>
-        n.string === op.string && n.fret === op.fret ? n : { ...n, string: op.string, fret: op.fret },
-      );
+      return withNote(score, op.noteId, (n) => {
+        // null clears it: the note becomes a pitch with no place on a fretboard.
+        if (op.string === null || op.fret === null) {
+          if (n.string === undefined && n.fret === undefined) return n;
+          const { string, fret, ...rest } = n;
+          return rest;
+        }
+        return n.string === op.string && n.fret === op.fret
+          ? n
+          : { ...n, string: op.string, fret: op.fret };
+      });
 
     case "note.addArticulation":
       return withNote(score, op.noteId, (n) =>

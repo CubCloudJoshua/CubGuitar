@@ -129,6 +129,13 @@ export function invertOp(score: Score, op: Op): OpKind[] {
       return found ? [{ type: "track.rename", trackId: op.trackId, name: found.track.name }] : [];
     }
 
+    case "track.setInstrument": {
+      const found = findTrack(score, op.trackId);
+      return found
+        ? [{ type: "track.setInstrument", trackId: op.trackId, instrument: found.track.instrument }]
+        : [];
+    }
+
     case "bar.insert":
       return [{ type: "bar.remove", trackId: op.trackId, barId: op.bar.id }];
 
@@ -215,10 +222,13 @@ export function invertOp(score: Score, op: Op): OpKind[] {
       const found = findNote(score, op.noteId);
       if (!found) return [];
       const { string, fret } = found.note;
-      // A note with no fingering yet has nothing to restore it to, and the op
-      // cannot express "unset". Removing the note is not the inverse of giving
-      // it a fret, so this reports no inverse rather than a wrong one.
-      if (string === undefined || fret === undefined) return [];
+      // A note that had no fingering goes back to having none. The op used to be
+      // unable to say that, so this reported no inverse at all — and undoing an
+      // arrangement then restored the pitches and the instrument while leaving
+      // every note carrying a string and fret it never had.
+      if (string === undefined || fret === undefined) {
+        return [{ type: "note.setFingering", noteId: op.noteId, string: null, fret: null }];
+      }
       return [{ type: "note.setFingering", noteId: op.noteId, string, fret }];
     }
 

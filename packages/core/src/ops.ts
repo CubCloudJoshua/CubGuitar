@@ -7,7 +7,7 @@
  * that matters most".
  */
 
-import type { Articulation, Bar, Beat, Duration, Id, Note, TimeSignature, Track } from "./score.js";
+import type { Articulation, Bar, Beat, Duration, Id, Instrument, Note, TimeSignature, Track } from "./score.js";
 
 export interface OpMeta {
   /** Unique op id (client id + counter under CRDT sync). */
@@ -30,6 +30,12 @@ export type OpKind =
     | { type: "track.insert"; index: number; track: Track }
     | { type: "track.remove"; trackId: Id }
     | { type: "track.rename"; trackId: Id; name: string }
+    /**
+     * Changes what a track *is* — a piano part becoming a guitar part, a guitar
+     * being retuned. An op rather than a setting so arranging is undoable and
+     * travels through a live session like any other edit.
+     */
+    | { type: "track.setInstrument"; trackId: Id; instrument: Instrument }
     | { type: "bar.insert"; trackId: Id; index: number; bar: Bar }
     | { type: "bar.remove"; trackId: Id; barId: Id }
     | { type: "bar.setTempo"; barId: Id; tempoBpm: number | null }
@@ -52,7 +58,15 @@ export type OpKind =
     | { type: "note.insert"; beatId: Id; note: Note; index?: number }
     | { type: "note.remove"; noteId: Id }
     | { type: "note.setPitch"; noteId: Id; pitch: number }
-    | { type: "note.setFingering"; noteId: Id; string: number; fret: number }
+    /**
+     * `null` clears the fingering, so a note goes back to being a pitch with no
+     * place on a fretboard. Needed so arranging a pitched part for guitar can be
+     * undone: without it the inverse could restore the pitch and the instrument and
+     * would leave every note carrying a string and fret it never had, which is a
+     * half-undone arrangement rather than an undone one. String and fret move
+     * together because a string without a fret means nothing.
+     */
+    | { type: "note.setFingering"; noteId: Id; string: number | null; fret: number | null }
     | { type: "note.addArticulation"; noteId: Id; articulation: Articulation }
     | { type: "note.removeArticulation"; noteId: Id; articulation: Articulation };
 

@@ -12,7 +12,7 @@ import { PeerCarets, PeerRoster } from "./collab/PeerCarets";
 import { caretEntry, caretsVisible, JoinReveal, useJoinReveal } from "./collab/JoinReveal";
 import { useSharedTransport } from "./collab/useSharedTransport";
 import { IsoPanel } from "./iso/IsoView";
-import { frettedGuitar, timeline as buildTimeline } from "@cubscore/core";
+import { frettedGuitar, STANDARD_BASS, timeline as buildTimeline } from "@cubscore/core";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
 import { BarMarkings } from "./editor/BarMarkings";
@@ -200,6 +200,22 @@ export function App() {
       if (collabStatus !== "off") stopCollab();
       if (editing) lib.leaveEditor();
       setPerforming(true);
+    },
+    onArrange: (kind) => {
+      const instrument =
+        kind === "bass"
+          ? { kind: "fretted" as const, tuning: [...STANDARD_BASS], frets: 24, capo: 0 }
+          : frettedGuitar();
+      const report = editor.arrangeTrack(instrument);
+      // An arrangement that transposed a part or could not place a note has to say
+      // so, in the same banner an import uses — a user whose piano line moved an
+      // octave should not have to work out why.
+      lib.setImportNotice({
+        unsupported: report.notes,
+        trackCount: 1,
+        barCount: editor.score.tracks[editor.cursor.track]?.bars.length ?? 0,
+        noteCount: report.placed,
+      });
     },
     switchDocument,
   });

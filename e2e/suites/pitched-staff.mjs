@@ -10,7 +10,7 @@
  */
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { appReady, newDevice, scoreText, withLibrary } from "../harness.mjs";
+import { appReady, newDevice, openPalette, scoreText, withLibrary } from "../harness.mjs";
 
 export const name = "pitched-staff";
 
@@ -176,4 +176,60 @@ export async function run({ browser, baseUrl, recorder }) {
     span <= 9,
     `span ${span} across ${JSON.stringify(frets)}`,
   );
+
+  // Arranging the pitched staff for guitar. This is the payoff of the fingering
+  // solver as a *feature* rather than a capability: a staff that is read-only
+  // because it has no strings gets some, and because it is an op batch the whole
+  // thing is one undo step.
+  const pianoFrets = () =>
+    page.evaluate(() => {
+      const status = document.body.innerText.match(/fret (\d+)/g) ?? [];
+      return status.length;
+    });
+  const railLabel = async () =>
+    (await page.locator(`${RAIL} button[aria-current="true"]`).getAttribute("aria-label")) ?? "";
+  recorder.check("still on the piano staff before arranging", (await railLabel()).includes("Piano"));
+
+  await openPalette(page);
+  await page.keyboard.type("Arrange this staff for guitar");
+  await settle(700);
+  await page.keyboard.press("Enter");
+  await settle(3000);
+
+  // Fret entry is the test that the staff really became a fretted one: it was
+  // refused above precisely because there was no tuning to turn a digit into a
+  // pitch, and it must work now.
+  const beforeTyping = await scoreText(page);
+  await page.keyboard.press("Digit4");
+  await settle(2000);
+  recorder.check(
+    "the arranged staff accepts fret entry, which it refused before",
+    (await scoreText(page)) !== beforeTyping,
+    (await scoreText(page)).slice(0, 90),
+  );
+  recorder.check(
+    "and the status line reports a fret, so the caret is on a string",
+    (await page.locator("text=/fret 4/").count()) === 1,
+  );
+  recorder.check(
+    "the arrangement said what it did",
+    (await page.locator("text=/Every note placed|Transposed|could not be reached/").count()) >= 1,
+    (await page.locator("body").innerText()).match(/[^\n]*(placed|Transposed)[^\n]*/)?.[0] ?? "no report",
+  );
+
+  // One undo takes the whole arrangement back, including the fret just typed being
+  // a separate step before it.
+  await page.keyboard.press("Control+z");
+  await settle(1500);
+  await page.keyboard.press("Control+z");
+  await settle(2500);
+  const afterUndo = await scoreText(page);
+  await page.keyboard.press("Digit5");
+  await settle(2000);
+  recorder.check(
+    "undoing the arrangement makes the staff read-only again",
+    (await scoreText(page)) === afterUndo,
+    (await scoreText(page)).slice(0, 90),
+  );
+  void pianoFrets;
 }

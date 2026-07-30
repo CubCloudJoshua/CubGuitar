@@ -130,3 +130,53 @@ describe("pitchAt", () => {
     expect(pitchAt(instrument, 1, 0)).toBe(66);
   });
 });
+
+describe("notes on a staff with no strings", () => {
+  /**
+   * A pitched staff — piano, vocal, horn — carries pitches with no string number.
+   * One-note-per-string is the rule for tablature and must not apply to those: two
+   * stringless notes in a beat are a chord.
+   */
+  const pitchedBeat = () => {
+    const score = createScore("Piano");
+    return { score, beatId: firstBeat(score).id };
+  };
+
+  it("holds a chord of stringless notes rather than replacing one with the next", () => {
+    const { score, beatId } = pitchedBeat();
+    const chord = applyBatch(score, {
+      id: "chord",
+      ops: [60, 64, 67].map((pitch, i) =>
+        op({ type: "note.insert", beatId, note: { id: `n${i}`, pitch, articulations: [] } }),
+      ),
+    });
+    expect(firstBeat(chord).notes.map((n) => n.pitch)).toEqual([60, 64, 67]);
+  });
+
+  it("still replaces by string when the notes have one", () => {
+    // The tablature rule is intact: typing a fret on a string replaces what was
+    // there rather than stacking a second note on one string.
+    const { score, beatId } = pitchedBeat();
+    const twice = applyBatch(score, {
+      id: "same-string",
+      ops: [
+        op({ type: "note.insert", beatId, note: createNote(64, 1, 0) }),
+        op({ type: "note.insert", beatId, note: createNote(67, 1, 3) }),
+      ],
+    });
+    expect(firstBeat(twice).notes).toHaveLength(1);
+    expect(firstBeat(twice).notes[0]?.fret).toBe(3);
+  });
+
+  it("does not let a stringless note displace a fretted one", () => {
+    const { score, beatId } = pitchedBeat();
+    const mixed = applyBatch(score, {
+      id: "mixed",
+      ops: [
+        op({ type: "note.insert", beatId, note: createNote(64, 1, 0) }),
+        op({ type: "note.insert", beatId, note: { id: "bare", pitch: 72, articulations: [] } }),
+      ],
+    });
+    expect(firstBeat(mixed).notes).toHaveLength(2);
+  });
+});
