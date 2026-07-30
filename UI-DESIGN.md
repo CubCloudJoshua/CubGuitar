@@ -16,6 +16,7 @@
 - **Type.** Bebas Neue for the wordmark and mode labels only. Inter (licensed, variable) for UI text; IBM Plex Mono demoted to data readouts (tick positions, tempo, tuning) where mono earns it. The score's engraving remains Bravura. Scale: 4 sizes, 2 weights, nothing else.
 - **Surface.** One continuous background (#080808), no card borders. Depth comes from two elevation tints (#111, #161616) and a single 1px hairline (#2A2A2A) used sparingly. Corners 8px, uniform.
 - **Color.** Background ramp, text ramp (#EEE / #9A9A9A / #6A6A6A), accent #F07D00 with #FF9120 reserved for live/active pulses. Semantic red only for destructive and error. Total palette: 9 values.
+- **Two sanctioned exceptions to one-accent**, both in `packages/design/src/tokens.ts` and both for the same reason: they mark things that are not playing, selected, or the primary action, and they have to be told apart at a glance. `presence` gives each collaborator a caret color, so nobody's caret can be mistaken for the playback cursor. `heat` colors how a bar was played when LISTEN is on. Neither uses a red-green pair, and neither is the only signal: presence carries a name tag, and heat is restated in numbers in the readout above the score.
 - **Iconography.** Single stroke-weight set (Lucide, 1.5px), never labeled AND iconed together except in the palette.
 - **The bear stays subtle.** CyberBear appears once: empty library state. Not in chrome.
 
