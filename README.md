@@ -17,12 +17,11 @@ Phase 1 functionally complete, Phase 2 under way, and realtime collaboration lan
 - **Import** — Guitar Pro (`.gp`, `.gp3`, `.gp4`, `.gp5`, `.gpx`), MusicXML, CapXML, alphaTex, by file picker or drag-and-drop.
 - **Export** — Guitar Pro `.gp`, alphaTex, MIDI, and print/PDF.
 - **Perform mode** — PERFORM switches to a stage view: true black, engraving at full white, notation 40% larger, a position readout readable across a room, page turns on tap zones a fifth of the screen wide or on PageUp/PageDown for a foot pedal, and a setlist filmstrip that hides while the music plays. Playback turns the pages itself, keeping the playing bar high in the frame so you are reading ahead of the beat rather than at it. Escape leaves and puts everything back. The stage palette doubles as a high-contrast theme.
+- **Fretboard reader** — FRETBOARD draws the neck in isometric projection with the music coming at you: each note a marker on the string and fret it is actually played on, sliding toward a strike line as playback advances. Notation tells you which fret; this tells you where your hand goes. It is also the first thing here that alphaTab does not draw — every position comes from `packages/core/src/timeline.ts` and the track's own tuning, nothing measured off an engraved canvas.
 - **Responsive** — full controls down to phone width.
 - **Keyboard and screen readers** — every action is in the command palette, controls keep their own key handling (the editor's shortcuts step aside for whatever has focus), a closed drawer is inert rather than an invisible row of tab stops, and state changes that used to be conveyed by colour alone — a copied link, a sync result, a live session, an error — are announced.
 
 Not built yet: offline collaboration merge (CRDT), email verification and password reset, and all AI features.
-
-**Fretboard reader** — FRETBOARD in the editor draws the neck in isometric projection with the music coming at you: each note a marker on the string and fret it is actually played on, sliding toward a strike line as playback advances. Notation tells you which fret; this tells you where your hand goes. It is also the first thing here that alphaTab does not draw — every position comes from `packages/core/src/timeline.ts` and the track's own tuning, nothing measured off an engraved canvas. See [STANDALONE.md](STANDALONE.md) for where that leads.
 
 Two planning documents cover what comes next: [STANDALONE.md](STANDALONE.md) on owning the engraver, the playback engine and the file parsers rather than renting them from alphaTab, and [INTEROP.md](INTEROP.md) on MIDI, MusicXML, Guitar Pro, ASCII tab and every other kind of tablature.
 
