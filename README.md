@@ -23,7 +23,7 @@ Phase 1 functionally complete, Phase 2 under way, and realtime collaboration lan
 
 Not built yet: offline collaboration merge (CRDT), email verification and password reset, and all AI features.
 
-Two planning documents cover what comes next: [STANDALONE.md](STANDALONE.md) on owning the engraver, the playback engine and the file parsers rather than renting them from alphaTab, and [INTEROP.md](INTEROP.md) on MIDI, MusicXML, Guitar Pro, ASCII tab and every other kind of tablature.
+[DIFFERENTIATION.md](DIFFERENTIATION.md) is the case for what CubScore can do that nothing else in the category can, filtered to things we can build because of something we already own. Two further planning documents cover what comes next: [STANDALONE.md](STANDALONE.md) on owning the engraver, the playback engine and the file parsers rather than renting them from alphaTab, and [INTEROP.md](INTEROP.md) on MIDI, MusicXML, Guitar Pro, ASCII tab and every other kind of tablature.
 
 Imported Guitar Pro files are editable, and editing one never costs you the file. The library row keeps the original bytes, filename, and import report untouched — autosave only ever writes the fields the editor owns — so an import carries both the original and your working edit. "Show imported original" in the palette switches which one opening shows; EDIT resumes the edit.
 
