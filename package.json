@@ -12,7 +12,8 @@
     "test": "pnpm -r test",
     "corpus": "node tools/corpus-check.mjs",
     "audio": "node tools/audio-check.mjs",
-    "e2e": "node e2e/run.mjs"
+    "e2e": "node e2e/run.mjs",
+    "timing": "node tools/timing-check.mjs"
   },
   "engines": {
     "node": ">=22"

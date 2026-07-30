@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAlphaTab } from "./useAlphaTab";
 import { useNarrow } from "./useNarrow";
 import { useEditor } from "./editor/useEditor";
@@ -10,6 +10,8 @@ import { useAuth } from "./auth/useAuth";
 import { collabIdFromLocation, useCollab } from "./collab/useCollab";
 import { PeerCarets, PeerRoster } from "./collab/PeerCarets";
 import { caretEntry, caretsVisible, JoinReveal, useJoinReveal } from "./collab/JoinReveal";
+import { IsoPanel } from "./iso/IsoView";
+import { timeline as buildTimeline } from "@cubscore/core";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
 import { BarMarkings } from "./editor/BarMarkings";
@@ -48,6 +50,12 @@ export function App() {
   // Perform mode restyles this shell rather than replacing it: see
   // perform/PerformMode.tsx for why the score element must not move.
   const [performing, setPerforming] = useState(false);
+  /**
+   * The fretboard reader (apps/web/src/iso). Off by default: it is a way of
+   * reading a part, not a replacement for notation, and the score is what most
+   * people came for.
+   */
+  const [fretboard, setFretboard] = useState(false);
   const [scroller, setScroller] = useState<HTMLElement | null>(null);
 
   // Tell the library whose it is. Every read of the library waits for this, so
@@ -126,6 +134,13 @@ export function App() {
   );
 
   const editing = !shared.active && lib.mode === "edit";
+  /**
+   * The fretboard reader needs our semantic model, which is authoritative only
+   * while the editor owns the document. An imported file opened in the player is
+   * shown from its original bytes, and those are alphaTab's to interpret.
+   */
+  const showFretboard = fretboard && editing && !performing;
+  const scoreTimeline = useMemo(() => buildTimeline(editor.score), [editor.score]);
   const currentEntry = lib.entries.find((e) => e.id === lib.currentId);
   const canEditCurrent = !shared.active && currentEntry?.core != null;
   const canShare = !shared.active && currentEntry !== undefined;
@@ -256,6 +271,16 @@ export function App() {
         )}
         {editing && collab.status === "off" && (
           <Button variant="outline" onClick={collab.start}>COLLAB</Button>
+        )}
+        {editing && !performing && (
+          <Button
+            variant="outline"
+            active={fretboard}
+            onClick={() => setFretboard((on) => !on)}
+            title="Fretboard reader: the neck in isometric view, notes arriving at a strike line"
+          >
+            FRETBOARD
+          </Button>
         )}
         {/* Perform is a reading mode, so it leaves the editor on the way in:
             stage-dark with an edit caret in it would invite typing you cannot
@@ -394,7 +419,7 @@ export function App() {
             borderRadius: performing ? 0 : 8,
             padding: 8,
             position: "relative",
-            minHeight: performing ? 0 : 200,
+            minHeight: performing ? 0 : showFretboard ? 520 : 200,
             display: "flex",
             gap: 8,
             // flex-start keeps the track rail from stretching to the score's
@@ -459,6 +484,19 @@ export function App() {
             )}
             {!performing && <JoinReveal phase={revealPhase} systemBoxes={c.systemBoxes} />}
           </div>
+          {/* Over the whole score area rather than inside the score's scroller:
+              that element is as tall as the engraved music, which is a fraction
+              of what a reader needs to show four seconds of neck. Drawn from our
+              own timeline and the track's tuning, not from anything alphaTab
+              measured — see iso/IsoView. */}
+          {showFretboard && (
+            <IsoPanel
+              timeline={scoreTimeline}
+              seconds={c.position.currentTime / 1000}
+              track={editor.score.tracks[editor.cursor.track]}
+              trackIndex={editor.cursor.track}
+            />
+          )}
           {performing && (
             <>
               <TapZone side="left" label="Previous page" onTap={() => turnPage(scroller, -1)} />

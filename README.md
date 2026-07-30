@@ -22,6 +22,8 @@ Phase 1 functionally complete, Phase 2 under way, and realtime collaboration lan
 
 Not built yet: offline collaboration merge (CRDT), email verification and password reset, and all AI features.
 
+**Fretboard reader** — FRETBOARD in the editor draws the neck in isometric projection with the music coming at you: each note a marker on the string and fret it is actually played on, sliding toward a strike line as playback advances. Notation tells you which fret; this tells you where your hand goes. It is also the first thing here that alphaTab does not draw — every position comes from `packages/core/src/timeline.ts` and the track's own tuning, nothing measured off an engraved canvas. See STANDALONE.md for where that leads.
+
 Imported Guitar Pro files are editable, and editing one never costs you the file. The library row keeps the original bytes, filename, and import report untouched — autosave only ever writes the fields the editor owns — so an import carries both the original and your working edit. "Show imported original" in the palette switches which one opening shows; EDIT resumes the edit.
 
 An import is converted to the semantic model, and pressing EDIT opens it with a report of anything the model could not carry. Multiple voices per bar and ties survive the conversion and round-trip exactly. Percussion is the notable gap — drum tracks play faithfully in the player but are dropped from the editable version rather than converted into notation that would be wrong. Alternate endings, chord diagrams, section markers, and detailed bend curves are reported the same way.

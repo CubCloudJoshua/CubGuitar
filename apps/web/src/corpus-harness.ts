@@ -18,6 +18,7 @@ import {
   type Op,
   type OpKind,
   type Score,
+  timeline,
 } from "@cubscore/core";
 import { fromAlphaTab } from "@cubscore/formats";
 
@@ -85,8 +86,31 @@ declare global {
       describeTex(tex: string): Promise<unknown>;
       renderAudioTex(tex: string, maxMs: number): Promise<AudioResult>;
       renderAudioBytes(bytes: number[], maxMs: number): Promise<AudioResult>;
+      timingTex(tex: string): Promise<TimingResult>;
+      timingBytes(bytes: number[]): Promise<TimingResult>;
     };
   }
+}
+
+/**
+ * alphaTab's playback length against our own timeline's.
+ *
+ * The timeline in @cubscore/core claims to line up with alphaTab's clock, and
+ * that claim carries the fretboard reader: a note placed by our seconds against a
+ * cursor driven by alphaTab's would drift visibly. The honest way to check it is
+ * against what alphaTab actually plays, so `alphaTabMs` is measured by
+ * synthesizing the score to its end rather than by re-deriving it from the model.
+ */
+export interface TimingResult {
+  ok: boolean;
+  error?: string;
+  alphaTabMs?: number;
+  coreMs?: number;
+  notes?: number;
+  /** Diagnostics, so a disagreement says which of the two inputs is off. */
+  writtenBars?: number;
+  playedBars?: number;
+  tempo?: number;
 }
 
 const host = document.getElementById("host");
@@ -393,8 +417,51 @@ async function renderAudio(trigger: () => void, maxMs: number): Promise<AudioRes
   }
 }
 
+/** Synthesizes to the end — no cap — so `ms` is alphaTab's whole track. */
+async function timing(trigger: () => void): Promise<TimingResult> {
+  const loaded = await run(trigger);
+  if (!loaded.ok) return { ok: false, error: loaded.error ?? "score failed to load" };
+  const source = api.score;
+  if (!source) return { ok: false, error: "no score after load" };
+
+  const core = fromAlphaTab(source).score;
+  const line = timeline(core);
+
+  const options = new alphaTab.synth.AudioExportOptions();
+  options.soundFonts = [await soundFont()];
+  options.sampleRate = 44100;
+  options.metronomeVolume = 0;
+  const exporter = await api.exportAudio(options);
+  try {
+    // Counted in samples, not read off chunk.currentTime. currentTime advances
+    // one chunk at a time, so with 1000ms chunks every score's length was a
+    // whole number of seconds and half the corpus looked like it disagreed by
+    // exactly 1000ms. Samples are exact and cost nothing extra.
+    let samples = 0;
+    for (;;) {
+      const chunk = await exporter.render(1000);
+      if (!chunk) break;
+      samples += chunk.samples.length;
+    }
+    const CHANNELS = 2;
+    return {
+      ok: true,
+      alphaTabMs: Math.round((samples / CHANNELS / options.sampleRate) * 1000),
+      coreMs: Math.round(line.durationSeconds * 1000),
+      notes: line.notes.length,
+      writtenBars: source.masterBars.length,
+      playedBars: line.bars.length,
+      tempo: core.tracks[0]?.bars[0]?.tempoBpm ?? 0,
+    };
+  } finally {
+    exporter.destroy();
+  }
+}
+
 window.cubscore = {
   loadTex: (tex) => run(() => api.tex(tex)),
+  timingTex: (tex) => timing(() => api.tex(tex)),
+  timingBytes: (bytes) => timing(() => api.load(new Uint8Array(bytes))),
   renderAudioTex: (tex, maxMs) => renderAudio(() => api.tex(tex), maxMs),
   renderAudioBytes: (bytes, maxMs) => renderAudio(() => api.load(new Uint8Array(bytes)), maxMs),
   // Bytes cross the CDP boundary as a plain array.
