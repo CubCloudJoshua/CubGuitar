@@ -31,6 +31,19 @@ export const color = {
   noticeBg: "#241A06",
 } as const;
 
+/**
+ * Collaborator colours: the one sanctioned exception to one-accent.
+ *
+ * UI-DESIGN.md spends the accent on exactly three things — playing, selected,
+ * primary action — and then asks for presence to render as "coloured carets with
+ * name tags in the score". Those two only reconcile if peers get their own hues,
+ * so these are deliberately none of them orange: a caret must never be mistaken
+ * for the playback cursor or for your own selection. Chosen to stay legible on
+ * near-black and to differ from each other for the common kinds of colour
+ * blindness, which is why there is no red-green pair.
+ */
+export const presence = ["#4EC9E8", "#B08CFF", "#FFD166", "#5DD39E", "#FF8FB1"] as const;
+
 export const font = {
   /** Data readouts: positions, tempo, tuning, code-like text. */
   mono: '"IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace',

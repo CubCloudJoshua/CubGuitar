@@ -39,9 +39,56 @@ export async function run({ browser, baseUrl, recorder }) {
   recorder.check("guest's note is local", (await scoreText(guest.page)).includes("9"));
   recorder.check("guest's note reached the host", (await scoreText(host.page)).includes("9"));
 
+  // Presence is a caret in the music, not a sentence about it. What matters is
+  // that it is positioned from the score's own geometry — inside the bar the
+  // peer is actually in — because a name tag parked at the wrong bar is worse
+  // than no name tag.
+  const caret = async (page) =>
+    page.evaluate(() => {
+      const tag = Array.from(document.querySelectorAll("span")).find(
+        (el) => el.textContent === "guest" && el.parentElement?.style.position === "absolute",
+      );
+      const marker = tag?.parentElement;
+      if (!marker) return null;
+      const box = marker.getBoundingClientRect();
+      const surface = document.querySelector(".at-surface")?.getBoundingClientRect();
+      return surface
+        ? {
+            x: Math.round(box.x),
+            height: Math.round(box.height),
+            insideScore:
+              box.x >= surface.x - 4 &&
+              box.x <= surface.x + surface.width + 4 &&
+              box.y >= surface.y - 24,
+          }
+        : null;
+    });
+
+  const hostCaret = await caret(host.page);
+  recorder.check("the peer's caret is drawn in the score", hostCaret !== null, JSON.stringify(hostCaret));
+  recorder.check("it sits inside the rendered music", hostCaret?.insideScore === true, JSON.stringify(hostCaret));
   recorder.check(
-    "presence shows the peer's caret",
+    "it spans the staff rather than being a dot",
+    (hostCaret?.height ?? 0) > 20,
+    `height ${hostCaret?.height}`,
+  );
+  // And the same information stays available in words, since a caret in a staff
+  // is not something a screen reader can convey.
+  recorder.check(
+    "presence is also announced in words",
     (await host.page.locator("text=/guest at bar 1, beat 2/").count()) === 1,
+  );
+
+  // Moving must move the caret, or it is a decoration rather than presence.
+  const before = hostCaret?.x ?? 0;
+  await guest.page.keyboard.press("ArrowRight");
+  await guest.page.keyboard.press("ArrowRight");
+  await host.page.waitForTimeout(1600);
+  const moved = await caret(host.page);
+  recorder.check(
+    "the caret follows the peer as they move",
+    (moved?.x ?? 0) > before,
+    `${before} -> ${moved?.x}`,
   );
 
   // Concurrent edits on different beats must converge.

@@ -40,6 +40,12 @@ export interface BarBox {
   y: number;
   width: number;
   height: number;
+  /**
+   * Where each beat's notes are centred, in the same coordinates. alphaTab calls
+   * this onNotesX and defines it as where a playback cursor belongs at that
+   * beat, which is exactly where someone else's caret belongs too.
+   */
+  beats: number[];
 }
 
 /** Speed trainer: each completed loop pass bumps speed by `step` up to `max`. */
@@ -138,7 +144,17 @@ export function useAlphaTab() {
       for (const system of lookup.staffSystems) {
         for (const bar of system.bars) {
           const b = bar.visualBounds;
-          boxes.push({ index: bar.index, x: b.x, y: b.y, width: b.w, height: b.h });
+          boxes.push({
+            index: bar.index,
+            x: b.x,
+            y: b.y,
+            width: b.w,
+            height: b.h,
+            // The first staff's beats. A master bar holds one BarBounds per
+            // staff and they share a rhythm, so any of them gives the same x
+            // positions; the visual bounds above already span every staff.
+            beats: (system.bars.length > 0 ? bar.bars[0]?.beats ?? [] : []).map((beat) => beat.onNotesX),
+          });
         }
       }
       setBarBoxes(boxes);

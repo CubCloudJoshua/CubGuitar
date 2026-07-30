@@ -8,6 +8,7 @@ import { useSharedView } from "./share/useSharedView";
 import { useShareLink } from "./share/useShareLink";
 import { useAuth } from "./auth/useAuth";
 import { collabIdFromLocation, useCollab } from "./collab/useCollab";
+import { PeerCarets, PeerRoster } from "./collab/PeerCarets";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
 import { BarMarkings } from "./editor/BarMarkings";
@@ -138,6 +139,7 @@ export function App() {
     openFilePicker: () => fileInputRef.current?.click(),
     toggleAccount: () => setAccountOpen((v) => !v),
     startPerforming: () => {
+      if (collabStatus !== "off") stopCollab();
       if (editing) lib.leaveEditor();
       setPerforming(true);
     },
@@ -253,11 +255,15 @@ export function App() {
         )}
         {/* Perform is a reading mode, so it leaves the editor on the way in:
             stage-dark with an edit caret in it would invite typing you cannot
-            see the tools for. */}
+            see the tools for. It also ends a live session, because leaving the
+            editor stops the effect that feeds the document into the renderer —
+            so collaborators would have gone on editing while the person on stage
+            read a score frozen at the moment they walked on. */}
         {!shared.active && c.score && (
           <Button
             variant="outline"
             onClick={() => {
+              if (collab.status !== "off") collab.stop();
               if (editing) lib.leaveEditor();
               setPerforming(true);
             }}
@@ -348,12 +354,11 @@ export function App() {
           >
             COPY
           </Button>
-          <span style={{ color: color.textDim }}>
-            {collab.peers.length} in session
-            {[...collab.cursors.values()]
-              .map((p) => ` · ${p.name} at bar ${p.bar + 1}, beat ${p.beat + 1}`)
-              .join("")}
-          </span>
+          {/* Where everyone is now shows in the score as coloured carets. What
+              is left here is the count, and the same information in words for
+              anyone who cannot see a caret in a staff. */}
+          <span style={{ color: color.textDim }}>{collab.peers.length} in session</span>
+          <PeerRoster cursors={collab.cursors} />
         </div>
       )}
       {collab.error && !performing && <ErrorBanner message={collab.error} />}
@@ -445,6 +450,9 @@ export function App() {
           >
             <div ref={c.hostRef} />
             {editing && !performing && <BarMarkings e={editor} barBoxes={c.barBoxes} />}
+            {collab.status === "live" && !performing && (
+              <PeerCarets cursors={collab.cursors} barBoxes={c.barBoxes} />
+            )}
           </div>
           {performing && (
             <>
