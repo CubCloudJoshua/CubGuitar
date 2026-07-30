@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toAlphaTex, type Score as CoreScore } from "@cubscore/core";
-import { fromAlphaTab, type ImportReport } from "@cubscore/formats";
+import { fromAlphaTab, fromAscii, type ImportReport } from "@cubscore/formats";
 import type { AlphaTabController } from "../useAlphaTab";
 import type { EditorController } from "../editor/useEditor";
 import { deleteEntry, getEntry, libraryOwner, listEntries, newId, putEntry, type LibraryEntry } from "./db";
@@ -368,6 +368,33 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     async (file: File) => {
       void flushSave();
       setMode("play");
+      // ASCII tablature: the format people actually swap, and the one that arrives
+      // as a .txt someone copied out of a forum. Parsed to our model and then
+      // serialised to alphaTex so it travels the same path as every other import
+      // — which means it plays, autosaves and becomes editable with no new
+      // machinery. The report says what the format could not carry, and rhythm is
+      // always on that list, because ASCII tab does not record any.
+      if (/\.(txt|tab)$/i.test(file.name)) {
+        const text = await file.text();
+        const { score, report } = fromAscii(text);
+        const notice: ImportReport = {
+          unsupported: report.unsupported,
+          trackCount: 1,
+          barCount: report.barCount,
+          noteCount: report.noteCount,
+        };
+        setImportNotice(notice);
+        // Nothing recovered means there was no tablature in the file. The notice
+        // says so; loading an empty score over what the user was looking at would
+        // be a worse answer than leaving it alone.
+        if (report.noteCount === 0) return;
+        const tex = toAlphaTex(score);
+        pendingRef.current = { id: newId(), format: "altex", bytes: null, tex, fileName: file.name, addedAt: Date.now() };
+        loadTex(tex);
+        setLibraryOpen(false);
+        return;
+      }
+
       const isTex = /\.(altex|tex)$/i.test(file.name);
       if (isTex) {
         const tex = await file.text();

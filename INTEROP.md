@@ -169,6 +169,12 @@ bar.
 The format the largest number of guitarists exchange, and the one every other
 program treats as beneath it.
 
+**Shipped, both directions.** Export writes the clipboard as well as a file,
+because pasting is the point; import accepts a `.txt` off a forum. Spacing is
+proportional to duration, since spacing is the only rhythm information the format
+can carry, and a tab where a held note looks the same as a fast one is one you have
+to already know to play from.
+
 **Export is nearly free and immediately useful** — six lines of dashes and fret
 numbers, which is what people paste into a forum, a text message, or a band's group
 chat. It should be a first-class export, not an afterthought, and it should be
@@ -247,7 +253,10 @@ Value per unit of risk, same as STANDALONE.md.
 1. ~~**MIDI file export.**~~ Shipped. Free from `timeline()` as predicted, and it
    proved the timeline against a second consumer — which is how the tie bug
    surfaced.
-2. **ASCII tab export.** Days. The format most people actually swap.
+2. ~~**ASCII tab export.**~~ Shipped, and import with it. The importer earned its
+   keep on the messy cases: lyrics and chord names around the staff, a missing
+   string line, ragged bar lines, the tuning stated in prose. Rhythm is reported as
+   not carried on every import, always.
 3. **MusicXML import.** Weeks. Carries tablature natively, so it is the highest
    fidelity import available and needs no fingering inference.
 4. **Percussion in the model.** Weeks. Unblocks four separate things and closes the

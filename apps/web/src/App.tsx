@@ -342,7 +342,7 @@ export function App() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".gp,.gp3,.gp4,.gp5,.gpx,.xml,.musicxml,.cap,.altex,.tex"
+          accept=".gp,.gp3,.gp4,.gp5,.gpx,.xml,.musicxml,.cap,.altex,.tex,.txt,.tab"
           style={{ display: "none" }}
           onChange={(e) => {
             const file = e.target.files?.[0];

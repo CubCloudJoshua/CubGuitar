@@ -8,7 +8,7 @@ import type { AlphaTabController } from "./useAlphaTab";
 import type { EditorController } from "./editor/useEditor";
 import type { LibraryController } from "./library/useLibrary";
 import type { CollabController } from "./collab/useCollab";
-import { exportGp, exportMidi, exportTex, printPdf } from "./export";
+import { exportAscii, exportGp, exportMidi, exportTex, printPdf } from "./export";
 
 interface CommandDeps {
   c: AlphaTabController;
@@ -79,6 +79,9 @@ export function useCommands(deps: CommandDeps): Command[] {
       // alphaTab's reading of the original bytes otherwise.
       add({ id: "export-midi", title: "Export MIDI", section: "Export", run: () => { if (editing) exportMidi(editor.score); else c.getApi()?.downloadMidi(); } });
       add({ id: "export-tex", title: "Export alphaTex", section: "Export", run: () => { const s = c.getScore(); if (s) exportTex(s); } });
+      if (editing) {
+        add({ id: "export-ascii", title: "Copy as ASCII tab", section: "Export", run: () => void exportAscii(editor.score) });
+      }
       add({ id: "export-pdf", title: "Print / PDF", section: "Export", run: () => { const api = c.getApi(); if (api) printPdf(api); } });
     }
 

@@ -61,7 +61,7 @@ jobs:
       - name: MIDI export agrees with alphaTab
         run: pnpm midi
 
-      # Drives the built app in a real browser across twelve journeys, standing
+      # Drives the built app in a real browser across thirteen journeys, standing
       # up the API and sync services against a throwaway data directory.
       - name: End-to-end suites
         run: pnpm e2e

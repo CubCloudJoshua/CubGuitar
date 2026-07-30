@@ -9,7 +9,7 @@
  */
 import * as alphaTab from "@coderline/alphatab";
 import type { Score as CoreScore } from "@cubscore/core";
-import { toMidi } from "@cubscore/formats";
+import { toAscii, toMidi } from "@cubscore/formats";
 
 function download(data: Uint8Array, fileName: string, mime: string) {
   // Copy into a plain ArrayBuffer: alphaTab's Uint8Array may be backed by a
@@ -56,6 +56,28 @@ export function exportMidi(score: CoreScore): { unsupported: string[] } {
   const { bytes, report } = toMidi(score);
   download(bytes, `${baseName(score.title)}.mid`, "audio/midi");
   return { unsupported: report.unsupported };
+}
+
+/**
+ * ASCII tablature, as a file and on the clipboard.
+ *
+ * The clipboard is the point. ASCII tab exists to be pasted — into a forum, a
+ * message, a band's group chat — and a format whose whole purpose is pasting that
+ * can only be downloaded has missed it. The file is there for the cases where a
+ * clipboard write is refused, which browsers do without warning.
+ */
+export async function exportAscii(score: CoreScore): Promise<{ copied: boolean; unsupported: string[] }> {
+  const { text, report } = toAscii(score);
+  let copied = false;
+  try {
+    await navigator.clipboard.writeText(text);
+    copied = true;
+  } catch {
+    // Refused, or no permission. The download below is the fallback, so this is
+    // not an error the user needs to hear about as one.
+  }
+  download(new TextEncoder().encode(text), `${baseName(score.title)}.txt`, "text/plain");
+  return { copied, unsupported: report.unsupported };
 }
 
 /** Opens the browser print dialog; the user picks "Save as PDF". */
