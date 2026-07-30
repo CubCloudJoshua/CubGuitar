@@ -48,6 +48,19 @@ export interface BarBox {
   beats: number[];
 }
 
+/**
+ * The vertical extent of one engraved staff system.
+ *
+ * Only the vertical extent, because the one thing that reads these — the join
+ * sequence, which materializes a score system by system — draws bands the full
+ * width of the surface. A horizontal bound would have to include the clef and
+ * key signature at the left edge, which sit outside every bar's own bounds.
+ */
+export interface SystemBox {
+  y: number;
+  height: number;
+}
+
 /** Speed trainer: each completed loop pass bumps speed by `step` up to `max`. */
 export interface RampConfig {
   enabled: boolean;
@@ -80,6 +93,7 @@ export function useAlphaTab() {
   const [zoom, setZoomState] = useState(1);
   const [ramp, setRampState] = useState<RampConfig>(DEFAULT_RAMP);
   const [barBoxes, setBarBoxes] = useState<BarBox[]>([]);
+  const [systemBoxes, setSystemBoxes] = useState<SystemBox[]>([]);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -132,6 +146,7 @@ export function useAlphaTab() {
       // The old geometry describes a layout that is being replaced. Keeping it
       // would leave overlays pinned to bars that have moved.
       setBarBoxes([]);
+      setSystemBoxes([]);
     });
     api.postRenderFinished.on(() => {
       setRendering(false);
@@ -158,6 +173,14 @@ export function useAlphaTab() {
         }
       }
       setBarBoxes(boxes);
+      // realBounds rather than visualBounds: the visual bounds stop at the
+      // outermost staff line, so bands built from them left an unlifted stripe of
+      // background between every pair of systems. The real bounds include the
+      // space the layout reserves around a system, so consecutive bands meet and
+      // the pass reads as one curtain instead of stripes.
+      setSystemBoxes(
+        lookup.staffSystems.map((system) => ({ y: system.realBounds.y, height: system.realBounds.h })),
+      );
     });
     api.playerReady.on(() => setReady(true));
     api.error.on((e) => setError(e.message || String(e)));
@@ -349,6 +372,7 @@ export function useAlphaTab() {
     zoom,
     ramp,
     barBoxes,
+    systemBoxes,
     error,
     loadTex,
     loadBytes,

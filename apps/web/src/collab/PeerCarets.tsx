@@ -28,14 +28,20 @@ function colourFor(peerId: string): string {
 export function PeerCarets({
   cursors,
   barBoxes,
+  entry,
 }: {
   cursors: Map<string, PeerCursor>;
   barBoxes: BarBox[];
+  /** How the carets arrive: the join sequence fades them in, see JoinReveal. */
+  entry?: { animation?: string };
 }) {
   if (cursors.size === 0 || barBoxes.length === 0) return null;
 
   return (
-    <>
+    <div style={{ ...entry, position: "absolute", inset: 0, pointerEvents: "none" }}>
+      {/* The join sequence's caret fade. Declared here because this is the only
+          thing it applies to, and it has to exist whenever a caret can mount. */}
+      <style>{`@keyframes cubscore-caret-in { from { opacity: 0 } to { opacity: 1 } }`}</style>
       {[...cursors.entries()].map(([peerId, peer]) => {
         const box = barBoxes.find((b) => b.index === peer.bar);
         // A peer editing a bar this client has not rendered — a longer document
@@ -81,7 +87,7 @@ export function PeerCarets({
           </div>
         );
       })}
-    </>
+    </div>
   );
 }
 

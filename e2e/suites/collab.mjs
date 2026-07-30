@@ -216,6 +216,137 @@ export async function run({ browser, baseUrl, recorder }) {
     (await scoreText(host.page)) === (await scoreText(guest.page)),
   );
 
+  // Joining plays a sequence: the score materializes system by system, then the
+  // peer carets fade in with names (UI-DESIGN.md, signature moment 3).
+  //
+  // It is 400ms long, so polling from Node would sample it four or five times and
+  // could easily miss the middle. Instead an init script installs an
+  // animation-frame recorder before the page's own code runs, so every frame of
+  // the join is on record and the checks below read that rather than a snapshot.
+  //
+  // Enough bars for several staff systems first: "system by system" needs systems.
+  for (let i = 0; i < 16; i += 1) {
+    await host.page.keyboard.press("Enter");
+    await host.page.waitForTimeout(70);
+  }
+  await host.page.waitForTimeout(2200);
+
+  const joiner = await newDevice(browser, recorder, "joiner");
+  await joiner.page.addInitScript(() => {
+    window.__reveal = [];
+    const tick = () => {
+      const bands = Array.from(document.querySelectorAll("[data-reveal-band]"));
+      const carets = Array.from(document.querySelectorAll("span")).filter(
+        (el) => el.parentElement?.style.position === "absolute" && el.textContent === "guest",
+      );
+      if (bands.length > 0 || carets.length > 0) {
+        window.__reveal.push({
+          bands: bands.map((el) => ({
+            top: Math.round(el.getBoundingClientRect().top),
+            height: Math.round(el.getBoundingClientRect().height),
+            opacity: Number(getComputedStyle(el).opacity),
+            delay: getComputedStyle(el).animationDelay,
+          })),
+          carets: carets.length,
+        });
+      }
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await joiner.page.goto(url, { waitUntil: "networkidle" });
+  await appReady(joiner.page);
+  await joiner.page.waitForTimeout(2500);
+
+  const frames = await joiner.page.evaluate(() => window.__reveal ?? []);
+  const banded = frames.filter((f) => f.bands.length > 0);
+  const mostBands = Math.max(0, ...banded.map((f) => f.bands.length));
+  recorder.check(
+    "the join draws one band per staff system",
+    mostBands >= 2,
+    `${mostBands} bands across ${frames.length} recorded frames`,
+  );
+
+  // The bands lift in order rather than together. Measured two ways: their CSS
+  // delays are distinct and increasing, and at least one real frame caught them
+  // at genuinely different opacities. Either one alone could pass a version that
+  // looks like a single flash.
+  const widest = banded.find((f) => f.bands.length === mostBands);
+  const delays = (widest?.bands ?? []).map((b) => Math.round(parseFloat(b.delay) * 1000) / 1000);
+  recorder.check(
+    "each band is delayed after the one above it",
+    delays.length >= 2 && delays.every((d, i) => i === 0 || d > delays[i - 1]),
+    JSON.stringify(delays),
+  );
+  recorder.check(
+    "the whole pass starts inside the 400ms budget",
+    delays.length > 0 && delays[delays.length - 1] <= 0.4,
+    `last band starts at ${delays[delays.length - 1]}s`,
+  );
+  const spread = Math.max(
+    0,
+    ...banded.map((f) => {
+      const o = f.bands.map((b) => b.opacity);
+      return Math.max(...o) - Math.min(...o);
+    }),
+  );
+  recorder.check(
+    "some frame caught the bands part-way through, at different opacities",
+    spread > 0.25,
+    `widest opacity spread ${spread.toFixed(2)}`,
+  );
+
+  // The bands cover the music while they are up, and are gone afterwards.
+  recorder.check(
+    "the bands tile the systems top to bottom with no gap between them",
+    (widest?.bands ?? []).length >= 2 &&
+      (widest?.bands ?? []).every((b, i) => {
+        const above = widest.bands[i - 1];
+        return b.height > 20 && (i === 0 || b.top <= above.top + above.height + 1);
+      }),
+    JSON.stringify((widest?.bands ?? []).map((b) => `${b.top}+${b.height}`)),
+  );
+  recorder.check(
+    "the carets wait for the score, never appearing over a band",
+    banded.every((f) => f.carets === 0),
+  );
+  recorder.check(
+    "the carets are there once the sequence ends",
+    (await joiner.page.locator("text=/guest at bar/").count()) === 1,
+  );
+  recorder.check(
+    "no band is left parked over the score",
+    (await joiner.page.locator("[data-reveal-band]").count()) === 0,
+  );
+  await joiner.page.close();
+
+  // Someone who asked for less motion gets the score at once. Not a faster
+  // sequence: a sequence is the thing they turned off.
+  const still = await newDevice(browser, recorder, "reduced", { width: 1400, height: 1000 }, undefined, {
+    reducedMotion: "reduce",
+  });
+  await still.page.addInitScript(() => {
+    window.__bands = 0;
+    const tick = () => {
+      window.__bands = Math.max(window.__bands, document.querySelectorAll("[data-reveal-band]").length);
+      requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+  await still.page.goto(url, { waitUntil: "networkidle" });
+  await appReady(still.page);
+  await still.page.waitForTimeout(2000);
+  recorder.check(
+    "reduced motion plays no sequence at all",
+    (await still.page.evaluate(() => window.__bands)) === 0,
+  );
+  recorder.check(
+    "reduced motion still gets the score and the peer caret",
+    (await scoreText(still.page)).length > 0 && (await still.page.locator("text=/guest at bar/").count()) === 1,
+  );
+  await still.page.close();
+  await host.page.waitForTimeout(1200);
+
   // A guest owns no library entry, so they must be offered a way to keep the
   // work; the host, whose entry autosaves, must not see the offer.
   recorder.check(

@@ -38,6 +38,22 @@ interface Member {
   socket: WebSocket;
   id: string;
   name: string;
+  /**
+   * Where this member's caret is, as last reported.
+   *
+   * Retained so a joiner can be told immediately. Cursor messages are only sent
+   * when a caret moves, so without this a new arrival saw no peer carets at all
+   * until somebody happened to move one — the room could look empty for minutes
+   * while three people were working in it.
+   */
+  cursor: { bar: number; beat: number } | null;
+}
+
+/** Shape check on an untrusted cursor before it is retained or forwarded. */
+function isCursor(value: unknown): value is { bar: number; beat: number } {
+  if (typeof value !== "object" || value === null) return false;
+  const c = value as { bar?: unknown; beat?: unknown };
+  return Number.isInteger(c.bar) && Number.isInteger(c.beat) && (c.bar as number) >= 0 && (c.beat as number) >= 0;
 }
 
 interface Room {
@@ -92,6 +108,25 @@ function peerList(room: Room): Array<{ id: string; name: string }> {
   return [...room.members.values()].map((m) => ({ id: m.id, name: m.name }));
 }
 
+/**
+ * Every other member's caret, in the same shape a live `cursor` message carries,
+ * so a joining client can apply them through the path it already has.
+ *
+ * The recipient is excluded: its own caret is not presence, and a client that
+ * drew a caret for itself would show two on the same beat.
+ */
+function cursorList(
+  room: Room,
+  exclude: Member,
+): Array<{ from: string; name: string; cursor: { bar: number; beat: number } }> {
+  const out: Array<{ from: string; name: string; cursor: { bar: number; beat: number } }> = [];
+  for (const m of room.members.values()) {
+    if (m === exclude || !m.cursor) continue;
+    out.push({ from: m.id, name: m.name, cursor: m.cursor });
+  }
+  return out;
+}
+
 // Bound to the loopback interface like the API, so the web app's proxy is the
 // only way in. It used to listen on every interface, which put an
 // unauthenticated service on the network.
@@ -114,16 +149,19 @@ server.on("connection", (socket, request) => {
     socket,
     id: `m${nextMemberId++}`,
     name: url.searchParams.get("name")?.slice(0, 40) || "guest",
+    cursor: null,
   };
   room.members.set(socket, member);
 
-  // Late joiners replay the snapshot plus everything since.
+  // Late joiners replay the snapshot plus everything since, and are handed
+  // everyone's caret so presence is there on arrival rather than on next move.
   send(socket, {
     type: "state",
     you: member.id,
     snapshot: room.snapshot,
     batches: room.batches,
     peers: peerList(room),
+    cursors: cursorList(room, member),
   });
   broadcast(room, socket, { type: "peers", peers: peerList(room) });
 
@@ -183,6 +221,8 @@ server.on("connection", (socket, request) => {
       }
 
       case "cursor":
+        if (!isCursor(message.cursor)) break;
+        member.cursor = message.cursor;
         broadcast(room, socket, { type: "cursor", from: member.id, name: member.name, cursor: message.cursor });
         break;
 

@@ -9,6 +9,7 @@ import { useShareLink } from "./share/useShareLink";
 import { useAuth } from "./auth/useAuth";
 import { collabIdFromLocation, useCollab } from "./collab/useCollab";
 import { PeerCarets, PeerRoster } from "./collab/PeerCarets";
+import { caretEntry, caretsVisible, JoinReveal, useJoinReveal } from "./collab/JoinReveal";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
 import { BarMarkings } from "./editor/BarMarkings";
@@ -37,6 +38,9 @@ export function App() {
   const shareLink = useShareLink();
   const auth = useAuth();
   const collab = useCollab(editor, auth.user?.email.split("@")[0] ?? "guest");
+  // The join sequence: the score materializes system by system, then the peer
+  // carets fade in (UI-DESIGN.md, signature moment 3).
+  const revealPhase = useJoinReveal(collab.joinCount, c.systemBoxes.length);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [accountOpen, setAccountOpen] = useState(false);
@@ -450,9 +454,10 @@ export function App() {
           >
             <div ref={c.hostRef} />
             {editing && !performing && <BarMarkings e={editor} barBoxes={c.barBoxes} />}
-            {collab.status === "live" && !performing && (
-              <PeerCarets cursors={collab.cursors} barBoxes={c.barBoxes} />
+            {collab.status === "live" && !performing && caretsVisible(revealPhase) && (
+              <PeerCarets cursors={collab.cursors} barBoxes={c.barBoxes} entry={caretEntry(revealPhase)} />
             )}
+            {!performing && <JoinReveal phase={revealPhase} systemBoxes={c.systemBoxes} />}
           </div>
           {performing && (
             <>

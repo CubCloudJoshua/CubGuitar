@@ -120,11 +120,13 @@ export async function newDevice(
   tag,
   viewport = { width: 1400, height: 1000 },
   permissions = undefined,
+  options = undefined,
 ) {
   const context = await browser.newContext({
     viewport,
     acceptDownloads: true,
     ...(permissions ? { permissions } : {}),
+    ...(options ?? {}),
   });
   const page = await context.newPage();
   recorder.watch(page, tag);

@@ -33,6 +33,8 @@ interface ServerMessage {
   from?: string;
   name?: string;
   cursor?: { bar: number; beat: number };
+  /** Everyone else's caret at the moment of joining, see the sync server. */
+  cursors?: Array<{ from: string; name: string; cursor: { bar: number; beat: number } }>;
 }
 
 export function collabIdFromLocation(): string | null {
@@ -51,6 +53,14 @@ export function useCollab(editor: EditorController, displayName: string) {
   const [peers, setPeers] = useState<Peer[]>([]);
   const [cursors, setCursors] = useState<Map<string, PeerCursor>>(new Map());
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Incremented each time this client loads a room's snapshot as a guest.
+   *
+   * The join sequence (JoinReveal) keys off it. A counter rather than a flag
+   * because a reconnect to the same room is another arrival, and a flag that was
+   * already true would let the second one land with no sequence at all.
+   */
+  const [joinCount, setJoinCount] = useState(0);
 
   const { applyRemote, setCommitListener, setLiveOrdering, loadScore } = editor;
 
@@ -121,6 +131,7 @@ export function useCollab(editor: EditorController, displayName: string) {
             if (message.snapshot) {
               loadScore(message.snapshot as CoreScore);
               for (const batch of message.batches ?? []) applyRemote(batch as OpBatch);
+              setJoinCount((n) => n + 1);
             } else {
               // The room has no snapshot: it was never seeded, or it was emptied
               // when its last member left. Nobody would ever seed it again, and
@@ -131,6 +142,16 @@ export function useCollab(editor: EditorController, displayName: string) {
               socket.send(JSON.stringify({ type: "init", score: scoreRef.current }));
             }
             if (message.peers) setPeers(message.peers);
+            // Presence on arrival. Cursor messages only go out when a caret
+            // moves, so without this a joiner saw no peer carets until somebody
+            // happened to move one — the room looked empty while it was not.
+            if (message.cursors) {
+              setCursors(
+                new Map(
+                  message.cursors.map((c) => [c.from, { name: c.name, bar: c.cursor.bar, beat: c.cursor.beat }]),
+                ),
+              );
+            }
             break;
           case "batch":
             if (message.batch) applyRemote(message.batch as OpBatch);
@@ -221,7 +242,7 @@ export function useCollab(editor: EditorController, displayName: string) {
 
   useEffect(() => () => socketRef.current?.close(), []);
 
-  return { status, url, peers, cursors, error, start, join, stop };
+  return { status, url, peers, cursors, error, joinCount, start, join, stop };
 }
 
 export type CollabController = ReturnType<typeof useCollab>;
