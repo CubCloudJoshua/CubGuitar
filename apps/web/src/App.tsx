@@ -13,7 +13,8 @@ import { caretEntry, caretsVisible, JoinReveal, useJoinReveal } from "./collab/J
 import { useSharedTransport } from "./collab/useSharedTransport";
 import { IsoPanel } from "./iso/IsoView";
 import { useListening } from "./listen/useListening";
-import { BarHeat, ListenReadout } from "./listen/ListenPanel";
+import { BarHeat, ListenReadout, PracticeStrip } from "./listen/ListenPanel";
+import { usePracticeHistory } from "./listen/usePracticeHistory";
 import { frettedGuitar, STANDARD_BASS, timeline as buildTimeline } from "@cubscore/core";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
@@ -196,6 +197,37 @@ export function App() {
     playing: c.playing,
   });
   const showListening = listening.on && editing && !performing;
+
+  /**
+   * Practice history for the open score (listen/usePracticeHistory).
+   *
+   * Keyed on the library entry rather than the document, because the point is a record
+   * that survives closing the piece and coming back to it tomorrow.
+   */
+  const practice = usePracticeHistory(editing ? lib.currentId ?? null : null);
+  /**
+   * Stores a take when playback stops.
+   *
+   * A take ends when the playhead does. Recording on every report instead would write a
+   * row six times a second, and recording only when the user turns LISTEN off would
+   * lose the take of anyone who plays the piece twice.
+   *
+   * The tempo stored is the first tempo the score states, times the playback speed. For
+   * a piece that changes tempo part way through that is an approximation, and the
+   * honest one: a take spans the whole piece, so no single number is exactly right, and
+   * the written tempo at the top is what a player means by "at what tempo".
+   */
+  const wasPlaying = useRef(false);
+  useEffect(() => {
+    const stopped = wasPlaying.current && !c.playing;
+    wasPlaying.current = c.playing;
+    if (!stopped || !listening.on || !listening.report) return;
+    practice.record(listening.report, {
+      trackIndex: editor.cursor.track,
+      trackName: editor.score.tracks[editor.cursor.track]?.name ?? "Track",
+      bpm: (editor.score.tracks[0]?.bars[0]?.tempoBpm ?? 120) * c.speed,
+    });
+  }, [c.playing, c.speed, listening.on, listening.report, practice, editor.cursor.track, editor.score]);
 
   const currentEntry = lib.entries.find((e) => e.id === lib.currentId);
   const canEditCurrent = !shared.active && currentEntry?.core != null;
@@ -509,6 +541,15 @@ export function App() {
       )}
 
       {listening.error && !performing && <ErrorBanner message={listening.error} />}
+      {/* Shown whether or not the microphone is on: a record you have to go and look
+          at is a record you stop looking at. */}
+      {editing && !performing && practice.summary && (
+        <PracticeStrip
+          summary={practice.summary}
+          barCount={editor.score.tracks[editor.cursor.track]?.bars.length ?? 0}
+          onClear={practice.clear}
+        />
+      )}
       {showListening && (
         <ListenReadout
           report={listening.report}

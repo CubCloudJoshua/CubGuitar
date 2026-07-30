@@ -8,8 +8,17 @@
  */
 
 const DB_NAME = "cubscore";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE = "scores";
+/**
+ * Graded takes, one row per play-through.
+ *
+ * Its own store rather than a field on the score. A score is loaded, rewritten and
+ * saved on every keystroke, and burying a growing history inside that row would mean
+ * rewriting every take on every edit — and losing all of them the first time two tabs
+ * raced the same save.
+ */
+const TAKES = "takes";
 
 export type ScoreFormat = "gp" | "altex";
 
@@ -57,18 +66,29 @@ function open(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: "id" });
       }
+      if (!db.objectStoreNames.contains(TAKES)) {
+        const takes = db.createObjectStore(TAKES, { keyPath: "id" });
+        // Every read of this store is "the takes for one score", so the index is not
+        // an optimisation: without it a user with a year of practice behind them pays
+        // for all of it to open one piece.
+        takes.createIndex("scoreId", "scoreId");
+      }
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error ?? new Error("indexedDB open failed"));
   });
 }
 
-function tx<T>(mode: IDBTransactionMode, run: (store: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+function tx<T>(
+  mode: IDBTransactionMode,
+  run: (store: IDBObjectStore) => IDBRequest<T>,
+  store: string = STORE,
+): Promise<T> {
   return open().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
-        const transaction = db.transaction(STORE, mode);
-        const request = run(transaction.objectStore(STORE));
+        const transaction = db.transaction(store, mode);
+        const request = run(transaction.objectStore(store));
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error ?? new Error("indexedDB request failed"));
         transaction.oncomplete = () => db.close();
@@ -146,4 +166,59 @@ export function deleteEntry(id: string): Promise<void> {
 
 export function newId(): string {
   return crypto.randomUUID();
+}
+
+/**
+ * One graded play-through, stored.
+ *
+ * Per-bar counts rather than per-note verdicts: the analysis in
+ * `packages/core/src/practice.ts` needs no more than this, and storing every note of
+ * every take would put a megabyte of practice history behind a four-minute song.
+ */
+export interface StoredTake {
+  id: string;
+  /** The library entry this take belongs to. */
+  scoreId: string;
+  ownerId?: string | null;
+  /** When the take happened. */
+  at: number;
+  /** Which staff was graded, and its name at the time. */
+  trackIndex: number;
+  trackName: string;
+  /** The tempo it was actually played at: written tempo times playback speed. */
+  bpm: number;
+  /** JSON of core's TakeBar[], which is what `summarise` reads. */
+  bars: string;
+  /** The overall numbers, kept out of the JSON so a list can be shown without parsing. */
+  accuracy: number | null;
+  judged: number;
+}
+
+/**
+ * Every take recorded for a score, oldest first.
+ *
+ * Filtered by owner for the same reason the score list is: on a shared machine, one
+ * person's practice record is not another person's business. Waits for sign-in to
+ * resolve first, or a take saved a moment later would be attributed to nobody.
+ */
+export async function listTakes(scoreId: string): Promise<StoredTake[]> {
+  await ownerKnown;
+  const rows = await tx<StoredTake[]>(
+    "readonly",
+    (s) => s.index("scoreId").getAll(scoreId) as IDBRequest<StoredTake[]>,
+    TAKES,
+  );
+  return rows.filter((r) => (r.ownerId ?? null) === owner).sort((a, b) => a.at - b.at);
+}
+
+export function putTake(take: StoredTake): Promise<void> {
+  return tx<IDBValidKey>("readwrite", (s) => s.put(take), TAKES).then(() => undefined);
+}
+
+/** Forgets a score's practice history, which is the only way to reset a record. */
+export async function clearTakes(scoreId: string): Promise<void> {
+  const rows = await listTakes(scoreId);
+  await Promise.all(
+    rows.map((row) => tx<undefined>("readwrite", (s) => s.delete(row.id) as IDBRequest<undefined>, TAKES)),
+  );
 }

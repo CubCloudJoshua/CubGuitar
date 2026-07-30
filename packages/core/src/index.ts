@@ -10,3 +10,4 @@ export * from "./listen.js";
 export * from "./arrange.js";
 export * from "./build.js";
 export * from "./alphatex.js";
+export * from "./practice.js";

@@ -12,7 +12,7 @@
  * about it, and "18ms behind the beat" is advice in a way that a colour is not.
  */
 import { color, font, heat, motion, typeScale } from "@cubscore/design";
-import type { BarResult, ListenReport, PitchReading } from "@cubscore/core";
+import { passageTempo, type BarResult, type ListenReport, type PitchReading, type PracticeSummary } from "@cubscore/core";
 import type { BarBox } from "../useAlphaTab";
 
 const NOTE_NAMES = ["C", "C♯", "D", "E♭", "E", "F", "F♯", "G", "A♭", "A", "B♭", "B"];
@@ -235,6 +235,96 @@ export function ListenReadout({
         title="Throw away this take and start again"
       >
         RESET TAKE
+      </button>
+    </div>
+  );
+}
+
+/**
+ * What the history says, in one line.
+ *
+ * Deliberately one line and deliberately always on, not a panel behind a button.
+ * A practice record you have to go and look at is a practice record you stop looking
+ * at, and the whole value of storing takes is that the answer is in front of you when
+ * you open the piece.
+ *
+ * Three things, because they are the three a player asks: how much have I done, what
+ * should I do now, and can I play it yet.
+ */
+export function PracticeStrip({
+  summary,
+  barCount,
+  onClear,
+}: {
+  summary: PracticeSummary;
+  /** Bars in the score, for the passage tempo. */
+  barCount: number;
+  onClear: () => void;
+}) {
+  if (summary.takes === 0) return null;
+  const drill = summary.drill.slice(0, 3);
+  const tempo = passageTempo(summary.bars, 0, Math.max(0, barCount - 1));
+  const learned = summary.bars.filter((b) => b.streak > 0).length;
+
+  return (
+    <div
+      role="status"
+      data-practice-strip=""
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        alignItems: "center",
+        gap: 12,
+        background: color.raised,
+        border: `1px solid ${color.hairline}`,
+        borderRadius: 8,
+        padding: "6px 10px",
+        marginBottom: 10,
+      }}
+    >
+      <span style={{ ...cell, color: color.textDim, letterSpacing: 0.5 }}>PRACTICE</span>
+      <span style={cell} data-practice-takes={summary.takes}>
+        {summary.takes} take{summary.takes === 1 ? "" : "s"}
+      </span>
+      <span style={dim}>
+        {learned} of {summary.bars.length} bars clean
+      </span>
+
+      {/* The point of the whole feature: not a score out of ten, but which bar to go
+          back to. Named in the user's numbering, which is one-based. */}
+      {drill.length > 0 ? (
+        <span style={cell} data-practice-drill={drill.map((b) => b + 1).join(",")}>
+          Work on bar{drill.length === 1 ? "" : "s"}{" "}
+          <span style={{ color: heat.wrong }}>{drill.map((b) => b + 1).join(", ")}</span>
+        </span>
+      ) : (
+        <span style={dim}>Nothing due — every bar is clean and rested</span>
+      )}
+
+      <span style={{ flex: 1 }} />
+
+      {/* The number every guitarist means by "I can play it", and the one nobody
+          records: the tempo of the passage's *worst* bar, not its best. */}
+      {tempo !== null && (
+        <span style={cell} data-practice-tempo={Math.round(tempo)}>
+          Clean at <span style={{ color: heat.clean }}>{Math.round(tempo)}</span> bpm
+        </span>
+      )}
+
+      <button
+        onClick={onClear}
+        style={{
+          ...cell,
+          background: "none",
+          border: `1px solid ${color.hairline}`,
+          borderRadius: 6,
+          padding: "2px 8px",
+          cursor: "pointer",
+          color: color.textDim,
+        }}
+        title="Forget this score's practice history, including its tempo record"
+      >
+        FORGET
       </button>
     </div>
   );

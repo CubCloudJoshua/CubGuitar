@@ -215,6 +215,20 @@ export async function run({ baseUrl, recorder }) {
       (await readHeat(page)).length === 0,
     );
 
+    // The take that just happened has to have been *kept*. This is the difference
+    // between a novelty and a practice tool: the record survives the page.
+    const strip = await page.locator("[data-practice-strip]").count();
+    recorder.check("the take was recorded and the history appeared", strip === 1);
+    const takes = await page.evaluate(
+      () => document.querySelector("[data-practice-takes]")?.getAttribute("data-practice-takes") ?? null,
+    );
+    recorder.check("it counts one take", takes === "1", `takes ${takes}`);
+    recorder.check(
+      "and names a bar to work on",
+      (await page.locator("[data-practice-drill]").count()) === 1,
+      (await page.locator("body").innerText()).match(/Work on bars?[^\n]*/)?.[0] ?? "nothing named",
+    );
+
     // Leaving the editor has to release the device. A microphone that outlives the
     // surface accounting for it leaves the browser's recording indicator lit with
     // nothing on screen explaining why, which is alarming and ought to be.
@@ -231,6 +245,28 @@ export async function run({ baseUrl, recorder }) {
     recorder.check(
       "and the readout does not come back on its own",
       (await page.locator("[data-listen-readout]").count()) === 0,
+    );
+
+    // Reloaded, which is the test that matters for storage: a history held in memory
+    // looks identical to a stored one until the page goes away.
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await appReady(page);
+    await page.waitForTimeout(2500);
+    // A reload reopens the score in the player, and the history lives beside the
+    // microphone in the editor, so this is the way back to it.
+    await page.getByRole("button", { name: "EDIT", exact: true }).click();
+    await page.waitForTimeout(2500);
+    recorder.check(
+      "the practice history survived a reload",
+      (await page.locator("[data-practice-strip]").count()) === 1,
+      (await page.locator("body").innerText()).slice(0, 120).replace(/\n/g, " | "),
+    );
+
+    await page.getByRole("button", { name: "FORGET", exact: true }).click();
+    await page.waitForTimeout(800);
+    recorder.check(
+      "and forgetting it takes the history away",
+      (await page.locator("[data-practice-strip]").count()) === 0,
     );
   } finally {
     await browser.close().catch(() => undefined);
