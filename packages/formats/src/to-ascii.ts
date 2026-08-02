@@ -82,6 +82,16 @@ function marker(articulations: readonly Articulation[]): string | null {
 /** One bar rendered as a column block: `strings` rows of equal width. */
 interface BarBlock {
   rows: string[];
+  /**
+   * Chord symbols above the staff and lyrics below it, both exactly as wide as the
+   * string rows so a name sits over the beat it belongs to. Alignment is the whole
+   * value of a chord line — a chart whose changes drift off their beats is worse
+   * than no chart.
+   */
+  chords: string;
+  lyrics: string;
+  /** Section starting at this bar, which forces a new system with a heading. */
+  section?: string;
   /** Rendered above the staff, for the bar number. */
   label: string;
   /** Prefix on the bar line, for a repeat opening. */
@@ -91,6 +101,8 @@ interface BarBlock {
 
 function renderBar(bar: Bar | undefined, stringCount: number, unsupported: Set<string>): BarBlock {
   const rows = Array.from({ length: stringCount }, () => "");
+  let chords = "";
+  let lyrics = "";
   const voice = bar?.voices[0];
   if (bar && bar.voices.length > 1) {
     unsupported.add("multiple voices per bar (only the first is written)");
@@ -120,13 +132,23 @@ function renderBar(bar: Bar | undefined, stringCount: number, unsupported: Set<s
       if (note.tiedToNext) unsupported.add("ties (no ASCII notation, written as separate frets)");
     }
 
-    const width = Math.max(wanted, ...cells.map((c) => c.length + 1));
+    // The beat's slot is widened for a long chord name or syllable rather than
+    // letting either overflow into the next beat's column: overflow is exactly the
+    // misalignment the chord line exists to avoid.
+    const width = Math.max(
+      wanted,
+      ...cells.map((c) => c.length + 1),
+      (beat.chord?.length ?? 0) + 1,
+      (beat.lyric?.length ?? 0) + 1,
+    );
     for (let i = 0; i < stringCount; i += 1) {
       const cell = cells[i] ?? "";
       // Frets are left-aligned in their slot and the rest is dashes, which is how a
       // hand-written tab reads: the number sits on the beat.
       rows[i] += cell.padEnd(width, "-");
     }
+    chords += (beat.chord ?? "").padEnd(width, " ");
+    lyrics += (beat.lyric ?? "").padEnd(width, " ");
     if (beat.tuplet) unsupported.add("tuplets (written as their spacing only)");
     if (beat.dots > 0) unsupported.add("dotted rhythms (written as their spacing only)");
   }
@@ -134,10 +156,15 @@ function renderBar(bar: Bar | undefined, stringCount: number, unsupported: Set<s
   // An empty bar still needs width, or the bar lines collapse together.
   if ((voice?.beats.length ?? 0) === 0) {
     for (let i = 0; i < stringCount; i += 1) rows[i] = "-".repeat(4);
+    chords = " ".repeat(4);
+    lyrics = " ".repeat(4);
   }
 
   return {
     rows,
+    chords,
+    lyrics,
+    ...(bar?.section !== undefined ? { section: bar.section } : {}),
     label: "",
     openRepeat: bar?.repeat?.start === true,
     closeRepeat: bar?.repeat?.endCount ?? 0,
@@ -182,6 +209,14 @@ export function toAscii(score: Score, options: AsciiOptions = {}): AsciiExportRe
     let used = labelWidth;
     const flush = () => {
       if (system.length === 0) return;
+      // The chord line rides above the staff, spaced to match the bar lines below
+      // it — a space where the staff has `|` or `:` — and appears only when a bar
+      // in the system actually has a chart, so an unlabelled tab stays six lines.
+      const spacer = (block: BarBlock, row: string) =>
+        `${block.openRepeat ? " " : ""}${row}${block.closeRepeat > 1 ? "  " : " "}`;
+      if (system.some((block) => block.chords.trim() !== "")) {
+        out.push(`${" ".repeat(labelWidth)}${system.map((b) => spacer(b, b.chords)).join("")}`.trimEnd());
+      }
       for (let s = 0; s < strings; s += 1) {
         let line = `${labels[s] ?? ""}|`;
         for (const block of system) {
@@ -191,6 +226,9 @@ export function toAscii(score: Score, options: AsciiOptions = {}): AsciiExportRe
         }
         out.push(line);
       }
+      if (system.some((block) => block.lyrics.trim() !== "")) {
+        out.push(`${" ".repeat(labelWidth)}${system.map((b) => spacer(b, b.lyrics)).join("")}`.trimEnd());
+      }
       out.push("");
       system = [];
       used = labelWidth;
@@ -198,6 +236,12 @@ export function toAscii(score: Score, options: AsciiOptions = {}): AsciiExportRe
 
     for (const block of blocks) {
       const cost = (block.rows[0]?.length ?? 0) + 1 + (block.openRepeat ? 1 : 0) + (block.closeRepeat > 1 ? 1 : 0);
+      // A named section starts its own system under its own heading, the way every
+      // hand-typed tab lays out a song.
+      if (block.section !== undefined) {
+        flush();
+        out.push(`[${block.section}]`);
+      }
       if (system.length > 0 && used + cost > width) flush();
       system.push(block);
       used += cost;

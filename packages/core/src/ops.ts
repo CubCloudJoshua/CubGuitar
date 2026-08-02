@@ -46,10 +46,23 @@ export type OpKind =
      * engraving one mid-score that was not there before.
      */
     | { type: "bar.setTimeSignature"; barId: Id; timeSignature: TimeSignature | null }
+    /**
+     * Names the section starting at this bar, `null` to remove the marker. Song
+     * structure as an op means an arrangement can be restructured in a live session
+     * and the restructuring undone, the same as any other edit.
+     */
+    | { type: "bar.setSection"; barId: Id; section: string | null }
     | { type: "beat.insert"; voiceId: Id; index: number; beat: Beat }
     | { type: "beat.remove"; voiceId: Id; beatId: Id }
     | { type: "beat.setDuration"; beatId: Id; duration: Duration }
     | { type: "beat.setDots"; beatId: Id; dots: 0 | 1 | 2 }
+    /**
+     * Sets the chord symbol taking effect at this beat, `null` to clear it. The
+     * symbol is text ("Am7", "C/G"); harmony.ts is where it becomes pitches.
+     */
+    | { type: "beat.setChord"; beatId: Id; chord: string | null }
+    /** Sets the syllable sung at this beat, `null` to clear it. */
+    | { type: "beat.setLyric"; beatId: Id; lyric: string | null }
     /**
      * `index` places the note within the beat's chord. Omitted for note entry,
      * which appends; supplied when undo restores a note that was displaced, so

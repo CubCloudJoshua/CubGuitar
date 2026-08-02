@@ -195,6 +195,37 @@ export function applyOp(score: Score, op: Op): Score {
         return same ? b : { ...b, timeSignature: op.timeSignature };
       });
 
+    case "bar.setSection":
+      return mapBars(score, (b) => {
+        if (b.id !== op.barId) return b;
+        if (op.section === null) {
+          if (b.section === undefined) return b;
+          const { section, ...rest } = b;
+          return rest;
+        }
+        return b.section === op.section ? b : { ...b, section: op.section };
+      });
+
+    case "beat.setChord":
+      return withBeat(score, op.beatId, (b) => {
+        if (op.chord === null) {
+          if (b.chord === undefined) return b;
+          const { chord, ...rest } = b;
+          return rest;
+        }
+        return b.chord === op.chord ? b : { ...b, chord: op.chord };
+      });
+
+    case "beat.setLyric":
+      return withBeat(score, op.beatId, (b) => {
+        if (op.lyric === null) {
+          if (b.lyric === undefined) return b;
+          const { lyric, ...rest } = b;
+          return rest;
+        }
+        return b.lyric === op.lyric ? b : { ...b, lyric: op.lyric };
+      });
+
     case "beat.insert":
       return mapVoices(score, (v) => {
         if (v.id !== op.voiceId) return v;

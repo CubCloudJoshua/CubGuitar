@@ -172,6 +172,16 @@ export function invertOp(score: Score, op: Op): OpKind[] {
       return [];
     }
 
+    case "bar.setSection": {
+      for (const track of score.tracks) {
+        for (const bar of track.bars) {
+          if (bar.id !== op.barId) continue;
+          return [{ type: "bar.setSection", barId: op.barId, section: bar.section ?? null }];
+        }
+      }
+      return [];
+    }
+
     case "beat.insert":
       return [{ type: "beat.remove", voiceId: op.voiceId, beatId: op.beat.id }];
 
@@ -190,6 +200,18 @@ export function invertOp(score: Score, op: Op): OpKind[] {
     case "beat.setDots": {
       const beat = beatById(score, op.beatId);
       return beat ? [{ type: "beat.setDots", beatId: op.beatId, dots: beat.dots }] : [];
+    }
+
+    case "beat.setChord": {
+      const beat = beatById(score, op.beatId);
+      // A beat that carried no chord goes back to carrying none, not to carrying
+      // some default: null is a real prior state here, same as a bar's meter.
+      return beat ? [{ type: "beat.setChord", beatId: op.beatId, chord: beat.chord ?? null }] : [];
+    }
+
+    case "beat.setLyric": {
+      const beat = beatById(score, op.beatId);
+      return beat ? [{ type: "beat.setLyric", beatId: op.beatId, lyric: beat.lyric ?? null }] : [];
     }
 
     case "note.insert": {

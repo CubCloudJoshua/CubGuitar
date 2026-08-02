@@ -95,8 +95,18 @@ function beatToTex(beat: Beat, instrument: Instrument, tiedFromPrev: Set<number>
   if (beat.dots === 1) properties.push("d");
   if (beat.dots === 2) properties.push("dd");
   if (beat.tuplet) properties.push(`tu ${beat.tuplet.actual}`);
+  // Chord symbols and lyrics are beat effects in alphaTex, which means the engraver
+  // draws them natively — the chord above the staff, the syllable below — with no
+  // overlay of ours anywhere near the music.
+  if (beat.chord !== undefined) properties.push(`ch "${texString(beat.chord)}"`);
+  if (beat.lyric !== undefined) properties.push(`lyrics "${texString(beat.lyric)}"`);
   if (properties.length > 0) token += `{${properties.join(" ")}}`;
   return token;
+}
+
+/** alphaTex strings take no escapes, so a double quote inside one becomes a single. */
+function texString(value: string): string {
+  return value.replace(/"/g, "'");
 }
 
 /** Bar-level directives (meter, tempo, repeats) belong to the first voice only. */
@@ -104,6 +114,7 @@ function barPrefix(bar: Bar): string[] {
   const prefix: string[] = [];
   if (bar.timeSignature) prefix.push(`\\ts ${bar.timeSignature.beats} ${bar.timeSignature.beatValue}`);
   if (bar.tempoBpm !== undefined) prefix.push(`\\tempo ${bar.tempoBpm}`);
+  if (bar.section !== undefined) prefix.push(`\\section "${texString(bar.section)}"`);
   if (bar.repeat?.start) prefix.push("\\ro");
   // Repeat close must lead the bar it belongs to. Written after the beats it
   // binds to the *next* bar instead, which adds a bar on every round trip.

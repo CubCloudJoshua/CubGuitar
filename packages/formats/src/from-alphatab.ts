@@ -171,7 +171,17 @@ function beatOf(beat: alphaTab.model.Beat, strings: Strings, ctx: Ctx): Beat {
     out.tuplet = { actual: beat.tupletNumerator, normal: beat.tupletDenominator };
   }
   if (beat.text) ctx.unsupported.add("beat text annotations");
-  if (beat.chord) ctx.unsupported.add("chord diagrams");
+  // The chord *symbol* is carried; the fingering diagram some files attach to it is
+  // not in the model, and saying so is what keeps the report honest.
+  if (beat.chord) {
+    if (beat.chord.name) out.chord = beat.chord.name;
+    if (beat.chord.showDiagram) ctx.unsupported.add("chord diagrams (names kept, diagrams dropped)");
+  }
+  // Multi-line lyrics exist in Guitar Pro; the model carries one line, which is the
+  // one the engraver draws, and reports the rest rather than interleaving them.
+  const lyric = beat.lyrics?.[0];
+  if (lyric !== undefined && lyric !== "") out.lyric = lyric;
+  if ((beat.lyrics?.length ?? 0) > 1) ctx.unsupported.add("additional lyric lines (the first is kept)");
   return out;
 }
 
@@ -231,7 +241,12 @@ function barOf(
     if (master.repeatCount > 0) out.repeat.endCount = master.repeatCount;
   }
 
-  if (master.section) ctx.unsupported.add("section markers");
+  if (master.section) {
+    // A section's display text when it has one, its rehearsal marker otherwise —
+    // the two fields Guitar Pro splits and a songwriter reads as one name.
+    const name = master.section.text || master.section.marker;
+    if (name) out.section = name;
+  }
   if (master.alternateEndings > 0) ctx.unsupported.add("alternate endings");
 
   return out;

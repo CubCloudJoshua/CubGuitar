@@ -40,6 +40,7 @@ import {
   type Score,
   type Track,
 } from "@cubscore/core";
+import { parseChord } from "@cubscore/core";
 import { escapeXml } from "./xml.js";
 
 export interface MusicXmlExportReport {
@@ -300,6 +301,16 @@ function writeMeasure(
       });
     }
 
+    if (bar?.section !== undefined) {
+      // Sections travel as rehearsal marks, which is what every notation program
+      // shows at a bar and what MusicXML has instead of named song structure.
+      xml.block("direction", { placement: "above" }, () => {
+        xml.block("direction-type", {}, () => {
+          xml.line(leaf("rehearsal", bar.section!));
+        });
+      });
+    }
+
     if (bar?.tempoBpm !== undefined && bar.tempoBpm > 0) {
       xml.block("direction", { placement: "above" }, () => {
         xml.block("direction-type", {}, () => {
@@ -326,6 +337,10 @@ function writeMeasure(
       let tiedIn = new Set<number>();
       for (const beat of voice.beats) {
         const nextTied = new Set<number>();
+        // A harmony element precedes the notes it applies to. Only from the first
+        // voice: chords belong to the bar, and two voices restating one would show
+        // a reader two copies of the same chart.
+        if (voiceIndex === 0 && beat.chord !== undefined) writeHarmony(xml, beat.chord);
         writeBeat(xml, beat, voiceIndex + 1, fifths, tiedIn, nextTied, track.instrument, unsupported);
         countNotes(beat.notes.length);
         tiedIn = nextTied;
@@ -406,6 +421,7 @@ function writeBeat(
   for (const [i, note] of chordOrder(beat.notes).entries()) {
     if (note.tiedToNext) nextTied.add(note.pitch);
     writeNote(xml, note, {
+      lyric: i === 0 ? beat.lyric : undefined,
       chord: i > 0,
       duration,
       type,
@@ -428,7 +444,69 @@ function writeTimeModification(xml: Xml, beat: Beat): void {
   });
 }
 
+/** MusicXML's kind vocabulary, from what the parser understood of the symbol. */
+function harmonyKind(symbol: string): { enumName: string; text: string } {
+  const parsed = parseChord(symbol);
+  const body = symbol.trim();
+  const slash = body.lastIndexOf("/");
+  // The exact suffix as typed rides in the text attribute, which is what round-trips.
+  const text = parsed
+    ? (slash >= 0 && parsed.bass !== undefined ? body.slice(0, slash) : body).slice(parsed.rootName.length)
+    : "";
+  if (!parsed) return { enumName: "other", text };
+  const has = (semitones: number) => parsed.intervals.includes(semitones);
+  let enumName = "major";
+  if (parsed.quality === "power") enumName = "power";
+  else if (parsed.quality === "aug") enumName = "augmented";
+  else if (parsed.quality === "sus") enumName = has(2) ? "suspended-second" : "suspended-fourth";
+  else if (parsed.quality === "dim") enumName = has(10) ? "half-diminished" : has(9) ? "diminished-seventh" : "diminished";
+  else if (parsed.quality === "min") {
+    enumName = has(14) && has(10) ? "minor-ninth" : has(10) ? "minor-seventh" : has(9) ? "minor-sixth" : "minor";
+  } else if (has(11)) {
+    enumName = has(21) ? "major-13th" : has(14) ? "major-ninth" : "major-seventh";
+  } else if (has(10)) {
+    enumName = has(21) ? "dominant-13th" : has(17) ? "dominant-11th" : has(14) ? "dominant-ninth" : "dominant";
+  } else if (has(9)) {
+    enumName = "major-sixth";
+  }
+  return { enumName, text };
+}
+
+/** A root or bass note name split into MusicXML's step and alter. */
+function stepAlter(name: string): { step: string; alter: number } {
+  const step = name[0]!.toUpperCase();
+  let alter = 0;
+  for (const c of name.slice(1)) alter += c === "#" ? 1 : c === "b" ? -1 : 0;
+  return { step, alter };
+}
+
+function writeHarmony(xml: Xml, symbol: string): void {
+  const parsed = parseChord(symbol);
+  // A symbol the parser cannot read still travels: MusicXML's kind element takes a
+  // text attribute, and the writer's exact text mattering more than our reading of
+  // it is the rule everywhere else in this model too.
+  const rootName = parsed?.rootName ?? symbol.trim().slice(0, 1);
+  const root = stepAlter(rootName);
+  const kind = harmonyKind(symbol);
+  xml.block("harmony", {}, () => {
+    xml.block("root", {}, () => {
+      xml.line(leaf("root-step", root.step));
+      if (root.alter !== 0) xml.line(leaf("root-alter", root.alter));
+    });
+    xml.line(leaf("kind", kind.enumName, kind.text.length > 0 ? { text: kind.text } : {}));
+    if (parsed?.bassName) {
+      const bass = stepAlter(parsed.bassName);
+      xml.block("bass", {}, () => {
+        xml.line(leaf("bass-step", bass.step));
+        if (bass.alter !== 0) xml.line(leaf("bass-alter", bass.alter));
+      });
+    }
+  });
+}
+
 interface NoteContext {
+  /** The beat's syllable, carried by its first note the way every format does. */
+  lyric?: string | undefined;
   chord: boolean;
   duration: number;
   type: string | undefined;
@@ -496,8 +574,21 @@ function writeNote(xml: Xml, note: Note, ctx: NoteContext): void {
       ctx.unsupported.add("slide targets (the model marks the note a slide leaves, not where it arrives)");
     }
 
+    // Lyric is the last element the schema allows on a note, so it is written by
+    // this helper after everything else — including when there are no notations at
+    // all, which is the common case for a sung melody line.
+    const finishWithLyric = () => {
+      if (ctx.lyric !== undefined) {
+        xml.block("lyric", {}, () => {
+          xml.line(leaf("syllabic", "single"));
+          xml.line(leaf("text", ctx.lyric!));
+        });
+      }
+    };
+
     const tied = ctx.tiedFrom || note.tiedToNext;
     if (!tied && !slide && articulations.length === 0 && ornaments.length === 0 && technical.length === 0) {
+      finishWithLyric();
       return;
     }
 
@@ -521,5 +612,6 @@ function writeNote(xml: Xml, note: Note, ctx: NoteContext): void {
         });
       }
     });
+    finishWithLyric();
   });
 }

@@ -428,6 +428,34 @@ describe("a file that comes back", () => {
   });
 });
 
+describe("songwriting data comes back", () => {
+  it("round-trips chords, lyrics and sections through our own file", () => {
+    const song = scoreOf([
+      bar(
+        [voice([
+          beat([note(64, 1, 0)], 4, { chord: "Am7", lyric: "down" }),
+          beat([note(66, 1, 2)], 4, { lyric: "by" }),
+          beat([note(67, 1, 3)], 4, { chord: "F#m7b5" }),
+          beat([note(69, 1, 5)], 4),
+        ])],
+        { section: "Verse" },
+      ),
+      bar([voice([beat([note(64, 1, 0)], 1, { chord: "C/G" })])], { section: "Chorus" }),
+    ]);
+    const { score } = roundTrip(song);
+    const first = score.tracks[0]!.bars[0]!.voices[0]!.beats;
+    expect(first[0]?.chord).toBe("Am7");
+    expect(first[0]?.lyric).toBe("down");
+    expect(first[1]?.lyric).toBe("by");
+    // The exact suffix survives via the kind text attribute, not a respelling.
+    expect(first[2]?.chord).toBe("F#m7b5");
+    expect(first[3]?.chord).toBeUndefined();
+    expect(score.tracks[0]!.bars[0]!.section).toBe("Verse");
+    expect(score.tracks[0]!.bars[1]!.section).toBe("Chorus");
+    expect(score.tracks[0]!.bars[1]!.voices[0]!.beats[0]?.chord).toBe("C/G");
+  });
+});
+
 describe("files we did not write", () => {
   /** A minimal MusicXML document around one part's measures. */
   function file(measures: string, attributes = "<divisions>1</divisions>"): string {
@@ -563,15 +591,48 @@ describe("files we did not write", () => {
     const { report } = fromMusicXml(
       file(
         quarter("C", 4) +
-          `<harmony><root><root-step>C</root-step></root><kind>major</kind></harmony>` +
           `<note><pitch><step>D</step><octave>4</octave></pitch><duration>1</duration>` +
-          `<lyric><text>la</text></lyric><notations><slur type="start"/><dynamics><f/></dynamics></notations></note>`,
+          `<notations><slur type="start"/><dynamics><f/></dynamics></notations></note>`,
       ),
     );
-    expect(report.unsupported).toContain("chord symbols");
-    expect(report.unsupported).toContain("lyrics");
     expect(report.unsupported).toContain("slurs");
     expect(report.unsupported).toContain("dynamics");
+  });
+
+  it("reads a chord symbol from a harmony element another program wrote", () => {
+    // No text attribute, only the kind vocabulary — the way Finale and Dorico write.
+    const { score } = fromMusicXml(
+      file(
+        `<harmony><root><root-step>B</root-step><root-alter>-1</root-alter></root><kind>minor-seventh</kind></harmony>` +
+          quarter("D", 4) +
+          `<harmony><root><root-step>C</root-step></root><kind>major</kind><bass><bass-step>G</bass-step></bass></harmony>` +
+          quarter("E", 4),
+      ),
+    );
+    const beats = score.tracks[0]!.bars[0]!.voices[0]!.beats;
+    expect(beats[0]?.chord).toBe("Bbm7");
+    expect(beats[1]?.chord).toBe("C/G");
+  });
+
+  it("reads a lyric onto its beat", () => {
+    const { score, report } = fromMusicXml(
+      file(
+        `<note><pitch><step>C</step><octave>4</octave></pitch><duration>1</duration>` +
+          `<lyric><syllabic>single</syllabic><text>la</text></lyric></note>`,
+      ),
+    );
+    expect(score.tracks[0]!.bars[0]!.voices[0]!.beats[0]?.lyric).toBe("la");
+    expect(report.unsupported).not.toContain("lyrics");
+  });
+
+  it("reads a rehearsal mark as a section", () => {
+    const { score } = fromMusicXml(
+      file(
+        `<direction placement="above"><direction-type><rehearsal>Chorus</rehearsal></direction-type></direction>` +
+          quarter("C", 4),
+      ),
+    );
+    expect(score.tracks[0]!.bars[0]!.section).toBe("Chorus");
   });
 
   it("reports unpitched percussion rather than inventing a drum", () => {

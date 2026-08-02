@@ -390,3 +390,90 @@ describe("reading tab as it is actually found", () => {
     expect(report.noteCount).toBe(1);
   });
 });
+
+describe("the chart above the tab", () => {
+  it("writes chords over the beats they change on, aligned to the column", () => {
+    const base = { ...createScore("Chart"), tracks: [createTrack("Guitar", frettedGuitar(), 1)] };
+    const beats = base.tracks[0]!.bars[0]!.voices[0]!.beats;
+    const charted = applyBatch(
+      base,
+      batch(
+        { type: "note.insert", beatId: beats[0]!.id, note: { id: "a1", pitch: 45, string: 5, fret: 0, articulations: [] } },
+        { type: "note.insert", beatId: beats[2]!.id, note: { id: "a2", pitch: 48, string: 5, fret: 3, articulations: [] } },
+        { type: "beat.setChord", beatId: beats[0]!.id, chord: "Am" },
+        { type: "beat.setChord", beatId: beats[2]!.id, chord: "C" },
+      ),
+    );
+    const { text } = toAscii(charted);
+    const lines = text.split("\n");
+    const chordLine = lines.find((l) => l.includes("Am"))!;
+    expect(chordLine).toBeDefined();
+    expect(chordLine.includes("|")).toBe(false);
+    // The A string row carries the frets; each chord must sit over its own fret.
+    const aString = lines.find((l) => l.startsWith("A"))!;
+    expect(chordLine.indexOf("Am")).toBe(aString.indexOf("0"));
+    expect(chordLine.indexOf("C")).toBe(aString.indexOf("3"));
+  });
+
+  it("writes lyrics under the staff the same way", () => {
+    const base = { ...createScore("Words"), tracks: [createTrack("Guitar", frettedGuitar(), 1)] };
+    const beats = base.tracks[0]!.bars[0]!.voices[0]!.beats;
+    const sung = applyBatch(
+      base,
+      batch(
+        { type: "beat.setLyric", beatId: beats[0]!.id, lyric: "hel-" },
+        { type: "beat.setLyric", beatId: beats[1]!.id, lyric: "lo" },
+      ),
+    );
+    const { text } = toAscii(sung);
+    const lines = text.split("\n");
+    const staffEnd = lines.map((l) => l.includes("|")).lastIndexOf(true);
+    const lyricLine = lines[staffEnd + 1]!;
+    expect(lyricLine).toContain("hel-");
+    expect(lyricLine.indexOf("hel-")).toBeLessThan(lyricLine.indexOf("lo"));
+  });
+
+  it("starts a new system under a section heading", () => {
+    const base = { ...createScore("Form"), tracks: [createTrack("Guitar", frettedGuitar(), 2)] };
+    const sectioned = applyBatch(
+      base,
+      batch({ type: "bar.setSection", barId: base.tracks[0]!.bars[1]!.id, section: "Chorus" }),
+    );
+    const { text } = toAscii(sectioned);
+    const lines = text.split("\n");
+    const heading = lines.indexOf("[Chorus]");
+    expect(heading).toBeGreaterThan(0);
+    // The heading sits between two systems, not inside one: the line right before
+    // it is blank or a staff end, and a staff follows it.
+    expect(lines.slice(heading + 1).some((l) => l.includes("|"))).toBe(true);
+  });
+
+  it("adds no chart rows to a score that has no chart", () => {
+    const base = { ...createScore("Plain"), tracks: [createTrack("Guitar", frettedGuitar(), 1)] };
+    const { text } = toAscii(base);
+    const lines = text.split("\n").filter((l) => l.length > 0);
+    // Header lines plus exactly six staff rows: nothing above, nothing below.
+    expect(lines.filter((l) => l.includes("|"))).toHaveLength(6);
+    expect(lines.at(-1)!.includes("|")).toBe(true);
+  });
+
+  it("widens a beat rather than letting a long chord name drift off it", () => {
+    const base = { ...createScore("Wide"), tracks: [createTrack("Guitar", frettedGuitar(), 1)] };
+    const beats = base.tracks[0]!.bars[0]!.voices[0]!.beats;
+    const charted = applyBatch(
+      base,
+      batch(
+        { type: "beat.setChord", beatId: beats[0]!.id, chord: "F#m7b5" },
+        { type: "note.insert", beatId: beats[1]!.id, note: { id: "w1", pitch: 45, string: 5, fret: 0, articulations: [] } },
+        { type: "beat.setChord", beatId: beats[1]!.id, chord: "B7" },
+      ),
+    );
+    const { text } = toAscii(charted);
+    const lines = text.split("\n");
+    const chordLine = lines.find((l) => l.includes("F#m7b5"))!;
+    const aString = lines.find((l) => l.startsWith("A"))!;
+    // The second beat moved right to make room, and the chord still sits on it.
+    expect(chordLine.indexOf("B7")).toBe(aString.indexOf("0"));
+    expect(chordLine.indexOf("B7")).toBeGreaterThan(chordLine.indexOf("F#m7b5") + "F#m7b5".length - 1);
+  });
+});

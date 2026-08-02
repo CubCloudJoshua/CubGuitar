@@ -72,6 +72,20 @@ export interface Beat {
   /** Tuplet grouping, e.g. 3:2 for a triplet. */
   tuplet?: { actual: number; normal: number };
   dots: 0 | 1 | 2;
+  /**
+   * Chord symbol taking effect at this beat, as written: "Am7", "F#m7b5", "C/G".
+   *
+   * Stored as the text and parsed on demand (harmony.ts), because the text is what
+   * the writer typed and what every format carries; a chord kept only as intervals
+   * would come back respelled. A chord stays in force until the next one, which is
+   * how a chart reads and why there is no "chord region" — the region is implied.
+   */
+  chord?: string;
+  /**
+   * The lyric sung at this beat — one syllable or word, the way lyrics attach in
+   * every notation format. A song's lyric line is the beats read in order.
+   */
+  lyric?: string;
 }
 
 export interface Voice {
@@ -87,6 +101,14 @@ export interface Bar {
   keySignature?: KeySignature;
   tempoBpm?: number;
   repeat?: { start?: boolean; endCount?: number };
+  /**
+   * Section name starting at this bar: "Verse", "Chorus", "Bridge".
+   *
+   * Song structure is the first thing a songwriter writes down and the last thing
+   * notation software carries. Like tempo and meter it belongs to the master bar, so
+   * readers take the first track that states one.
+   */
+  section?: string;
 }
 
 export type Instrument =

@@ -1,0 +1,10 @@
+\title "Songwriting"
+\artist "CubScore Fixtures"
+\tempo 96
+.
+\track "Guitar"
+\staff{score tabs} \tuning e4 b3 g3 d3 a2 e2
+\section "Verse" 0.5.4{ch "C" lyrics "Down"} 3.5.4{lyrics "by"} 2.4.4{ch "Am" lyrics "the"} 0.3.4{lyrics "wa-"} |
+2.3.4{ch "F" lyrics "ter"} 1.2.4 3.5.4{ch "G"} 0.1.4 |
+\section "Chorus" (0.5 1.2 0.1).2{ch "C" lyrics "run"} (2.4 3.5).2{ch "G/B" lyrics "home"} |
+0.5.1{ch "Am7" lyrics "now"} |

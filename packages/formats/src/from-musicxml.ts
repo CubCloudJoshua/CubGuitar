@@ -152,7 +152,6 @@ function articulationsOf(note: XmlNode, unsupported: Set<string>): Articulation[
   if (child(note, "notehead")?.attrs["parentheses"] === "yes") out.add("ghost");
 
   if (has(notations, "dynamics")) unsupported.add("dynamics");
-  if (has(note, "lyric")) unsupported.add("lyrics");
   if (has(notations, "fermata")) unsupported.add("fermatas");
   if (has(notations, "arpeggiate")) unsupported.add("arpeggio marks");
   return [...out];
@@ -209,6 +208,55 @@ interface Event {
   voice: string;
   node: XmlNode;
   notes: Note[];
+  /** Chord symbol from the harmony element preceding this event's notes. */
+  chord?: string;
+}
+
+/**
+ * A harmony element back into the symbol a writer would type.
+ *
+ * The `text` attribute wins when present, because it is the exact suffix the source
+ * carried — our own exports put it there, and so does MuseScore. The kind enum is the
+ * fallback vocabulary for files that state only that.
+ */
+const KIND_SUFFIX: Record<string, string> = {
+  major: "",
+  minor: "m",
+  dominant: "7",
+  "major-seventh": "maj7",
+  "minor-seventh": "m7",
+  "major-sixth": "6",
+  "minor-sixth": "m6",
+  diminished: "dim",
+  "diminished-seventh": "dim7",
+  "half-diminished": "m7b5",
+  augmented: "aug",
+  "suspended-fourth": "sus4",
+  "suspended-second": "sus2",
+  power: "5",
+  "dominant-ninth": "9",
+  "major-ninth": "maj9",
+  "minor-ninth": "m9",
+  "dominant-11th": "11",
+  "dominant-13th": "13",
+  "major-13th": "maj13",
+};
+
+function harmonySymbol(node: XmlNode): string | null {
+  const root = child(node, "root");
+  const step = childText(root, "root-step");
+  if (!step) return null;
+  const alter = childNumber(root, "root-alter") ?? 0;
+  const accidental = alter > 0 ? "#".repeat(alter) : "b".repeat(-alter);
+  const kind = child(node, "kind");
+  const suffix = kind?.attrs["text"] ?? KIND_SUFFIX[kind?.text.trim() ?? "major"] ?? "";
+  const bass = child(node, "bass");
+  const bassStep = childText(bass, "bass-step");
+  const bassAlter = childNumber(bass, "bass-alter") ?? 0;
+  const bassText = bassStep
+    ? `/${bassStep}${bassAlter > 0 ? "#".repeat(bassAlter) : "b".repeat(-bassAlter)}`
+    : "";
+  return `${step}${accidental}${suffix}${bassText}`;
 }
 
 function readMeasure(
@@ -219,8 +267,14 @@ function readMeasure(
   const events: Event[] = [];
   let tick = 0;
   let last: Event | undefined;
+  /** A harmony read but not yet attached: it applies to the next event that starts. */
+  let pendingChord: string | null = null;
 
   for (const node of measure.children) {
+    if (node.name === "harmony") {
+      pendingChord = harmonySymbol(node);
+      continue;
+    }
     if (node.name === "backup") {
       tick = Math.max(0, tick - Math.round((childNumber(node, "duration") ?? 0) * scale));
       last = undefined;
@@ -253,6 +307,10 @@ function readMeasure(
     }
 
     const event: Event = { tick, ticks, voice, node, notes: [] };
+    if (pendingChord !== null) {
+      event.chord = pendingChord;
+      pendingChord = null;
+    }
     if (!isRest) {
       const note = noteOf(node, unsupported);
       if (note) event.notes.push(note);
@@ -309,11 +367,14 @@ function beatsOf(events: Event[], barTicks: number): Beat[] {
     // second is a file saying something contradictory, and the note keeps its place.
     if (event.tick < at) continue;
     const value = valueOf(event.node, event.ticks);
+    const lyric = childText(child(event.node, "lyric"), "text");
     beats.push({
       id: nextId("b"),
       duration: value.duration,
       dots: value.dots,
       ...(value.tuplet ? { tuplet: value.tuplet } : {}),
+      ...(event.chord !== undefined ? { chord: event.chord } : {}),
+      ...(lyric !== undefined && lyric !== "" ? { lyric } : {}),
       notes: event.notes,
     });
     at = event.tick + event.ticks;
@@ -446,6 +507,9 @@ export function fromMusicXml(source: string): MusicXmlImportResult {
         .find((t) => Number.isFinite(t) && t > 0);
       if (tempo !== undefined) bar.tempoBpm = Math.round(tempo);
 
+      const rehearsal = descendants(measure, "rehearsal")[0]?.text.trim();
+      if (rehearsal) bar.section = rehearsal;
+
       const barlines = children(measure, "barline");
       for (const barline of barlines) {
         const repeat = child(barline, "repeat");
@@ -465,7 +529,6 @@ export function fromMusicXml(source: string): MusicXmlImportResult {
   }
 
   for (const name of [
-    ["harmony", "chord symbols"],
     ["words", "text directions"],
     ["wedge", "hairpin dynamics"],
     ["slur", "slurs"],

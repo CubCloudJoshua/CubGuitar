@@ -13,3 +13,5 @@ export * from "./alphatex.js";
 export * from "./practice.js";
 export * from "./sync.js";
 export * from "./diff.js";
+export * from "./harmony.js";
+export * from "./compose.js";
