@@ -57,7 +57,6 @@ export interface RecordingController {
   mark: (scoreSeconds: number) => void;
   /** Removes the mark nearest where the recording is now. */
   unmark: () => void;
-  clearMarks: () => void;
   /** Jumps the recording to a moment in the score. */
   seekToScore: (scoreSeconds: number) => void;
   /** The audio element, for the app to mount. */
@@ -95,41 +94,63 @@ export function useRecording(deps: Deps): RecordingController {
   const [seconds, setSeconds] = useState(0);
   const [duration, setDuration] = useState(0);
   const audio = useRef<HTMLAudioElement | null>(null);
+  /**
+   * The object URL currently handed out, so it can be released exactly once.
+   *
+   * A ref rather than the state, because releasing has to happen outside React's
+   * rendering: see `attach`.
+   */
+  const objectUrl = useRef<string | null>(null);
   const live = useRef(deps);
   live.current = deps;
 
   const alignment = deps.saved;
 
-  // Revoked when the file changes or the hook goes away: an object URL pins its blob in
-  // memory for the life of the document, and a user who tries four recordings would be
-  // holding all four.
-  useEffect(() => {
-    return () => {
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [url]);
-
-  const attach = useCallback((file: File) => {
-    setUrl((previous) => {
-      if (previous) URL.revokeObjectURL(previous);
-      return URL.createObjectURL(file);
-    });
-    setFileName(file.name);
-    setSeconds(0);
-    setPlaying(false);
+  /**
+   * Releases the current object URL, if there is one.
+   *
+   * An object URL pins its blob in memory for the life of the document, so a user who
+   * tries four recordings would be holding all four — and an audio file is tens of
+   * megabytes, not kilobytes.
+   */
+  const release = useCallback(() => {
+    if (objectUrl.current) URL.revokeObjectURL(objectUrl.current);
+    objectUrl.current = null;
   }, []);
+
+  // The last one goes when the hook does, so leaving the page does not leave a blob
+  // pinned behind it.
+  useEffect(() => release, [release]);
+
+  const attach = useCallback(
+    (file: File) => {
+      // Created here and not inside a state updater. React invokes an updater twice in
+      // StrictMode, which minted two URLs and tracked one, leaking the whole audio file
+      // on every attach — the exact reason side effects do not belong in an updater.
+      release();
+      const next = URL.createObjectURL(file);
+      objectUrl.current = next;
+      setUrl(next);
+      setFileName(file.name);
+      setSeconds(0);
+      setPlaying(false);
+      // A mark says "this moment of *this* recording is that moment of the score", so
+      // it means nothing about a different file. Keeping marks across an attach let the
+      // notation follow a new recording using the old one's alignment, silently.
+      live.current.onAlignmentChange(alignmentOf([]));
+    },
+    [release],
+  );
 
   const detach = useCallback(() => {
     audio.current?.pause();
-    setUrl((previous) => {
-      if (previous) URL.revokeObjectURL(previous);
-      return null;
-    });
+    release();
+    setUrl(null);
     setFileName(null);
     setPlaying(false);
     setSeconds(0);
     live.current.setSynthMuted(false);
-  }, []);
+  }, [release]);
 
   const playPause = useCallback(() => {
     const el = audio.current;
@@ -155,10 +176,6 @@ export function useRecording(deps: Deps): RecordingController {
   const unmark = useCallback(() => {
     const el = audio.current;
     live.current.onAlignmentChange(withoutPointNear(live.current.saved, el?.currentTime ?? 0));
-  }, []);
-
-  const clearMarks = useCallback(() => {
-    live.current.onAlignmentChange(alignmentOf([]));
   }, []);
 
   const seekToScore = useCallback((scoreSeconds: number) => {
@@ -230,7 +247,6 @@ export function useRecording(deps: Deps): RecordingController {
     playPause,
     mark,
     unmark,
-    clearMarks,
     seekToScore,
     ref,
     events,

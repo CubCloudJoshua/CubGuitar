@@ -16,6 +16,8 @@ import { clearTakes, listTakes, newId, putTake, libraryOwner, type StoredTake } 
 export interface PracticeController {
   /** Null until the first load finishes, so the UI can tell empty from unknown. */
   summary: PracticeSummary | null;
+  /** Why the history could not be read, if it could not. */
+  error: string | null;
   /** Stores a finished pass. Ignores one that graded nothing. */
   record: (report: ListenReport, context: { trackIndex: number; trackName: string; bpm: number }) => void;
   /** Forgets this score's history. The only way to reset a tempo record. */
@@ -49,6 +51,7 @@ function takeOf(row: StoredTake): Take {
 
 export function usePracticeHistory(scoreId: string | null): PracticeController {
   const [rows, setRows] = useState<StoredTake[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!scoreId) {
@@ -60,9 +63,21 @@ export function usePracticeHistory(scoreId: string | null): PracticeController {
     // against the new one's bars until the read returns, which is a report about a
     // score the user is not looking at.
     setRows(null);
-    void listTakes(scoreId).then((found) => {
-      if (live) setRows(found);
-    });
+    setError(null);
+    listTakes(scoreId).then(
+      (found) => {
+        if (live) setRows(found);
+      },
+      (cause: unknown) => {
+        // A read can genuinely fail — another tab holding the database through a
+        // version upgrade is the case that exists. Without this the promise rejects
+        // unhandled, `rows` stays null forever, and the strip simply never appears
+        // with nothing anywhere saying why.
+        if (!live) return;
+        setRows([]);
+        setError(cause instanceof Error ? cause.message : "Practice history could not be read.");
+      },
+    );
     return () => {
       live = false;
     };
@@ -102,5 +117,5 @@ export function usePracticeHistory(scoreId: string | null): PracticeController {
 
   const summary = useMemo(() => (rows === null ? null : summarise(rows.map(takeOf))), [rows]);
 
-  return { summary, record, clear };
+  return { summary, error, record, clear };
 }

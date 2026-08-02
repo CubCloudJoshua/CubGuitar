@@ -189,6 +189,20 @@ describe("the tempo you can actually play it at", () => {
     expect(passageTempo(summary.bars, 0, 1)).toBeNull();
   });
 
+  it("has no tempo for a passage where some bars have never been attempted", () => {
+    // The bug this replaced: a bar nobody has played is absent from the history
+    // entirely, so filtering to the range and checking what is left ignored it — and
+    // the strip announced a tempo for a whole piece on the strength of the few bars
+    // somebody had practised.
+    const summary = summarise([take(T0, 120, [bar(0, 4, 4), bar(1, 4, 4)])]);
+    expect(passageTempo(summary.bars, 0, 1)).toBe(120);
+    expect(passageTempo(summary.bars, 0, 7)).toBeNull();
+  });
+
+  it("has no tempo for a backwards range", () => {
+    expect(passageTempo(summarise([take(T0, 120, [bar(0, 4, 4)])]).bars, 3, 1)).toBeNull();
+  });
+
   it("has no tempo for a range nobody has played", () => {
     expect(passageTempo(summarise([take(T0, 120, [bar(0, 4, 4)])]).bars, 5, 9)).toBeNull();
   });

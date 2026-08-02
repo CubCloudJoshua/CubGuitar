@@ -121,6 +121,16 @@ export function useListening(deps: Deps): ListeningController {
   const [current, setCurrent] = useState<PitchReading | null>(null);
   const [heard, setHeard] = useState(false);
   const rig = useRef<Rig | null>(null);
+  /**
+   * Bumped by every start and every stop, so a start can tell whether it is still
+   * wanted by the time the permission prompt has been answered.
+   *
+   * Opening a microphone is asynchronous and stopping is not. Without this, turning
+   * LISTEN on and leaving the editor before the stream arrived ran the teardown first
+   * and then stored a live stream behind it: the microphone stayed open, the browser's
+   * recording indicator stayed lit, and nothing on screen accounted for either.
+   */
+  const attempt = useRef(0);
 
   // The frame loop reads these rather than closing over them, so changing track or
   // editing the score does not have to tear down the microphone.
@@ -128,6 +138,7 @@ export function useListening(deps: Deps): ListeningController {
   live.current = deps;
 
   const stop = useCallback(() => {
+    attempt.current += 1;
     const it = rig.current;
     rig.current = null;
     if (!it) return;
@@ -139,6 +150,7 @@ export function useListening(deps: Deps): ListeningController {
   }, []);
 
   const start = useCallback(async () => {
+    const mine = (attempt.current += 1);
     setError(null);
     try {
       // All three processors off. They exist to make speech intelligible over a
@@ -148,8 +160,19 @@ export function useListening(deps: Deps): ListeningController {
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
       });
+      // Abandoned while the prompt was open. The stream exists and has to be closed
+      // here, because nothing else holds a reference to it.
+      if (attempt.current !== mine) {
+        for (const track of stream.getTracks()) track.stop();
+        return;
+      }
       const ctx = new AudioContext();
       await ctx.resume().catch(() => undefined);
+      if (attempt.current !== mine) {
+        for (const track of stream.getTracks()) track.stop();
+        void ctx.close().catch(() => undefined);
+        return;
+      }
       const analyser = ctx.createAnalyser();
       analyser.fftSize = FFT_SIZE;
       ctx.createMediaStreamSource(stream).connect(analyser);
@@ -235,6 +258,8 @@ export function useListening(deps: Deps): ListeningController {
     } catch (cause) {
       // Denied, or no input device. Either way the user has to be told, because
       // nothing on screen would otherwise change and they would assume it worked.
+      // A failure of a start nobody is waiting for should not raise a banner.
+      if (attempt.current !== mine) return;
       const message =
         cause instanceof DOMException && cause.name === "NotAllowedError"
           ? "Microphone access was declined. Listening needs it to hear you play."

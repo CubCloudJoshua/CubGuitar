@@ -157,6 +157,20 @@ export async function run({ browser, baseUrl, recorder }) {
   await page.waitForTimeout(300);
   recorder.check("undo removes it", (await attr(page, "data-recording-marks")) === "0");
 
+  // A mark says "this moment of *this* recording is that moment of the score", so it
+  // means nothing about a different file. Attaching a second one used to leave the old
+  // marks in place and follow the new audio with the wrong alignment, silently.
+  await page.locator("[data-recording-mark]").click();
+  await page.waitForTimeout(300);
+  recorder.check("a mark is recorded again", (await attr(page, "data-recording-marks")) === "1");
+  await page.setInputFiles("[data-audio-input]", wav);
+  await page.waitForTimeout(1200);
+  recorder.check(
+    "attaching another recording starts from no marks",
+    (await attr(page, "data-recording-marks")) === "0",
+    `marks ${await attr(page, "data-recording-marks")}`,
+  );
+
   await page.getByRole("button", { name: "REMOVE", exact: true }).click();
   await page.waitForTimeout(500);
   recorder.check(

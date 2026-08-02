@@ -122,7 +122,7 @@ export function RecordingBar({
           <span style={dim} title={recording.fileName ?? ""}>
             {(recording.fileName ?? "").slice(0, 28)}
           </span>
-          <button style={chip} onClick={recording.detach} title="Remove the recording; the marks are kept">
+          <button style={chip} onClick={recording.detach} title="Remove the recording">
             REMOVE
           </button>
         </>

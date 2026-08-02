@@ -180,15 +180,16 @@ export async function run({ baseUrl, recorder }) {
       [0, 1, 2, 3].every((bar) => heat.some((b) => b.bar === bar)),
       JSON.stringify(heat),
     );
-    // The one thing about the grading this environment can honestly assert: a note in
-    // the WAV was matched to a note in the score, which means the frames were stamped
-    // in score time and not in wall-clock time. A pipeline that fed the detector
-    // correctly but timestamped it wrongly would report every bar at zero.
-    recorder.check(
-      "and something played was matched to something written",
-      heat.some((b) => b.accuracy > 0),
-      JSON.stringify(heat),
-    );
+    // Whether a played note *matched* a written one is deliberately not asserted, and
+    // this is the second attempt at learning that. The check was here, it passed twice,
+    // and it began failing on a machine of a different speed with no code change —
+    // because it rests on the same non-real-time playhead the comment at the top of
+    // this file says cannot be relied on. A check that passes or fails on how fast the
+    // CI box is tells you nothing on either outcome.
+    //
+    // The stamping it was reaching for is verified where a clock can be controlled:
+    // packages/core/src/listen.test.ts synthesizes a performance from a timeline and
+    // grades it back against the score it came from.
     recorder.check(
       "each band is coloured by how its bar went",
       heat.every((b) => ["clean", "weak", "wrong"].includes(b.heat)),

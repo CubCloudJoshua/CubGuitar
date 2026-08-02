@@ -250,14 +250,24 @@ export function drillOrder(bars: readonly BarHistory[], now: number): number[] {
  * the fastest the *whole passage* went, which is the slowest of its bars. Null when any
  * bar in the range has never been clean, because a passage with a bar you cannot play
  * has no tempo you can play it at.
+ *
+ * "Every bar" includes the ones with no history at all. A bar nobody has attempted is
+ * absent from `bars` entirely, so filtering to the range and checking what is left
+ * silently ignores it — and the strip then announced "clean at 92bpm" for a
+ * two-hundred-bar piece on the strength of the eight bars somebody had practised. A
+ * range is only answerable when every bar in it has been played, so the count is
+ * checked and not just the contents.
  */
 export function passageTempo(
   bars: readonly BarHistory[],
   from: number,
   to: number,
 ): number | null {
+  if (to < from) return null;
   const inRange = bars.filter((b) => b.bar >= from && b.bar <= to);
-  if (inRange.length === 0) return null;
+  // Every bar of the passage has to be accounted for. Distinct bars, because a
+  // caller could hand us a list with duplicates and a length check alone would pass.
+  if (new Set(inRange.map((b) => b.bar)).size < to - from + 1) return null;
   const tempos = inRange.map((b) => b.cleanBpm);
   if (tempos.some((t) => t === null || t <= 0)) return null;
   return Math.min(...(tempos as number[]));

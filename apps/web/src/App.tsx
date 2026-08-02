@@ -613,6 +613,7 @@ export function App() {
       {listening.error && !performing && <ErrorBanner message={listening.error} />}
       {/* Shown whether or not the microphone is on: a record you have to go and look
           at is a record you stop looking at. */}
+      {practice.error && !performing && <ErrorBanner message={practice.error} />}
       {editing && !performing && practice.summary && (
         <PracticeStrip
           summary={practice.summary}
