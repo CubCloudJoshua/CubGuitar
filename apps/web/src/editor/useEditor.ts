@@ -3,6 +3,12 @@ import {
   applyBatch,
   arrangeForFretted,
   beginSession,
+  composeAccompaniment,
+  parseChord,
+  voicings,
+  type AccompanimentPattern,
+  type ComposeReport,
+  type KeySignature,
   beatTicks,
   createBar,
   createNote,
@@ -279,6 +285,99 @@ export function useEditor() {
   const setCommitListener = useCallback((listener: ((batch: OpBatch) => void) | null) => {
     commitListenerRef.current = listener;
   }, []);
+
+  /** Sets or clears the chord symbol on the caret's beat. */
+  const setChord = useCallback(
+    (chord: string | null) => {
+      if (!beat) return;
+      commit([op({ type: "beat.setChord", beatId: beat.id, chord })], chord ? `Chord ${chord}` : "Clear chord");
+    },
+    [beat, commit],
+  );
+
+  /** Sets or clears the syllable on the caret's beat. */
+  const setLyric = useCallback(
+    (lyric: string | null) => {
+      if (!beat) return;
+      commit([op({ type: "beat.setLyric", beatId: beat.id, lyric })], lyric ? "Lyric" : "Clear lyric");
+    },
+    [beat, commit],
+  );
+
+  /** Names or unnames the section starting at the caret's bar. */
+  const setSection = useCallback(
+    (section: string | null) => {
+      if (!bar) return;
+      commit([op({ type: "bar.setSection", barId: bar.id, section })], section ? `Section ${section}` : "Clear section");
+    },
+    [bar, commit],
+  );
+
+  /**
+   * The chord in force just before the caret, for suggesting what comes next.
+   * Strictly before: replacing the caret's own chord should still be suggested in
+   * the context of what precedes it, not of the thing being replaced.
+   */
+  const chordBeforeCursor = useMemo(() => {
+    if (!track) return null;
+    let last: string | null = null;
+    outer: for (const [bi, b] of track.bars.entries()) {
+      for (const [xi, x] of (b.voices[0]?.beats ?? []).entries()) {
+        if (bi > cursor.bar || (bi === cursor.bar && xi >= cursor.beat)) break outer;
+        if (x.chord !== undefined) last = x.chord;
+      }
+    }
+    return last;
+  }, [track, cursor.bar, cursor.beat]);
+
+  /** The key at the caret: the nearest stated signature at or before it, else C. */
+  const keyAtCursor = useMemo((): KeySignature => {
+    if (!track) return { fifths: 0, mode: "major" };
+    for (let i = Math.min(cursor.bar, track.bars.length - 1); i >= 0; i -= 1) {
+      const stated = track.bars[i]?.keySignature;
+      if (stated) return stated;
+    }
+    return { fifths: 0, mode: "major" };
+  }, [track, cursor.bar]);
+
+  /**
+   * Writes the caret beat's chord (or the one in force) into the beat as playable
+   * notes — the best voicing on this track's neck. The bridge from chart to tab.
+   */
+  const insertVoicing = useCallback((): boolean => {
+    if (!beat || !track || track.instrument.kind !== "fretted") return false;
+    const symbol = beat.chord ?? chordBeforeCursor;
+    if (symbol === null || symbol === undefined) return false;
+    const parsed = parseChord(symbol);
+    if (!parsed) return false;
+    const best = voicings(parsed, track.instrument, 1)[0];
+    if (!best) return false;
+    const ops: Op[] = [];
+    for (const [i, fret] of best.frets.entries()) {
+      if (fret < 0) continue;
+      const string = i + 1;
+      ops.push(
+        op({
+          type: "note.insert",
+          beatId: beat.id,
+          note: { id: nextId("n"), pitch: pitchAt(track.instrument, string, fret), string, fret, articulations: [] },
+        }),
+      );
+    }
+    commit(ops, `Voice ${symbol}`);
+    return true;
+  }, [beat, track, chordBeforeCursor, commit]);
+
+  /** Generates the accompaniment track from the chart. One op, one undo step. */
+  const composeTrack = useCallback(
+    (pattern: AccompanimentPattern): ComposeReport => {
+      const prev = stateRef.current;
+      const { ops, report } = composeAccompaniment(prev.score, { pattern });
+      if (ops.length > 0) commit(ops.map(op), `Accompaniment (${pattern})`);
+      return report;
+    },
+    [commit],
+  );
 
   /** Enters a fret on the cursor's string, combining consecutive digits into 10-24. */
   const typeDigit = useCallback(
@@ -558,6 +657,13 @@ export function useEditor() {
     moveBeat,
     moveString,
     arrangeTrack,
+    setChord,
+    setLyric,
+    setSection,
+    chordBeforeCursor,
+    keyAtCursor,
+    insertVoicing,
+    composeTrack,
     undo,
     redo,
     applyRemote,

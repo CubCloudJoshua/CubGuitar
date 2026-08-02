@@ -43,6 +43,63 @@ const chip: React.CSSProperties = {
   transition: `border-color ${motion.base}, color ${motion.base}`,
 };
 
+/**
+ * The section name starting at the caret's bar: "Verse", "Chorus".
+ *
+ * Song structure belongs on the bar it starts at, same as tempo and meter — it is
+ * the third thing that was ever going to live in this chip row, which is why the row
+ * exists. Shown dim when the bar has no section, so naming one is one click and an
+ * unnamed score carries no chrome shouting about it.
+ */
+function SectionChip({ section, onCommit }: { section: string | undefined; onCommit: (next: string | null) => void }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(section ?? "");
+
+  useEffect(() => setDraft(section ?? ""), [section]);
+
+  const commit = () => {
+    setEditing(false);
+    const next = draft.trim();
+    if (next !== (section ?? "")) onCommit(next === "" ? null : next);
+  };
+
+  if (!editing) {
+    return (
+      <button
+        onClick={() => setEditing(true)}
+        aria-label={section ? `Section ${section}, click to rename` : "Name a section starting at this bar"}
+        title="Section — Verse, Chorus… Starts at this bar. Empty removes it."
+        data-section-chip=""
+        style={{ ...chip, ...(section ? {} : { color: color.textDim }) }}
+        onMouseEnter={(ev) => (ev.currentTarget.style.borderColor = color.accent)}
+        onMouseLeave={(ev) => (ev.currentTarget.style.borderColor = color.hairline)}
+      >
+        {section ?? "SEC"}
+      </button>
+    );
+  }
+
+  return (
+    <input
+      ref={(el) => el?.focus()}
+      value={draft}
+      aria-label="Section name"
+      placeholder="Verse"
+      onChange={(ev) => setDraft(ev.target.value.slice(0, 24))}
+      onBlur={commit}
+      onKeyDown={(ev) => {
+        if (ev.key === "Enter") commit();
+        if (ev.key === "Escape") {
+          setDraft(section ?? "");
+          setEditing(false);
+        }
+        ev.stopPropagation();
+      }}
+      style={{ ...chip, width: 92, borderColor: color.accent, background: color.raised, outline: "none" }}
+    />
+  );
+}
+
 /** A chip that swaps itself for an input on click and commits on blur or Enter. */
 function TempoChip({ bpm, onCommit }: { bpm: number; onCommit: (next: number) => void }) {
   const [editing, setEditing] = useState(false);
@@ -239,6 +296,10 @@ export function BarMarkings({ e, barBoxes }: { e: EditorController; barBoxes: Ba
         <span style={{ display: "flex", gap: 4, pointerEvents: "auto" }}>
           {showTempo && <TempoChip bpm={bpm} onCommit={e.setTempo} />}
           <MeterChip beats={meter.beats} beatValue={meter.beatValue} onCommit={e.setTimeSignature} />
+          <SectionChip
+            section={e.score.tracks[e.cursor.track]?.bars[e.cursor.bar]?.section}
+            onCommit={e.setSection}
+          />
         </span>
       </div>
     </>

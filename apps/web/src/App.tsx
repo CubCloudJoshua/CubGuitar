@@ -22,6 +22,7 @@ import { frettedGuitar, STANDARD_BASS, timeline as buildTimeline } from "@cubsco
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
 import { BarMarkings } from "./editor/BarMarkings";
+import { SongwritingOverlay } from "./editor/Songwriting";
 import { PerformBar, Setlist, TapZone, turnPage, usePerformShell } from "./perform/PerformMode";
 import { TransportPill } from "./components/TransportPill";
 import { ExportMenu } from "./components/ExportMenu";
@@ -295,6 +296,17 @@ export function App() {
     },
     listening,
     recording: { open: recordingOpen, toggle: () => setRecordingOpen((v) => !v) },
+    onCompose: (pattern) => {
+      const report = editor.composeTrack(pattern);
+      // The same banner an import or an arrangement uses: what was written, what
+      // was skipped, and which symbols nobody could read.
+      lib.setImportNotice({
+        unsupported: report.notes,
+        trackCount: 1,
+        barCount: report.barsWritten + report.barsSkipped,
+        noteCount: report.barsWritten,
+      });
+    },
     onArrange: (kind) => {
       const instrument =
         kind === "bass"
@@ -716,6 +728,7 @@ export function App() {
           >
             <div ref={c.hostRef} />
             {editing && !performing && <BarMarkings e={editor} barBoxes={c.barBoxes} />}
+            {editing && !performing && <SongwritingOverlay e={editor} barBoxes={c.barBoxes} />}
             {showListening && listening.report && (
               <BarHeat report={listening.report} barBoxes={c.barBoxes} />
             )}
@@ -780,7 +793,7 @@ export function App() {
         {shared.active
           ? "Shared score. Click a note to seek, drag to select a loop region, use the speed trainer to practice. Nothing to install. Cmd+K for every command."
           : editing
-            ? "Editing. Type 0-9 to enter frets on the highlighted string, arrows to move, +/− to add or remove beats, Enter for a new bar, Ctrl+Z to undo. Cmd+K for every command. Work autosaves to the library."
+            ? "Editing. Type 0-9 to enter frets on the highlighted string, arrows to move, C for a chord, L for a lyric (Tab walks the bar), +/− to add or remove beats, Enter for a new bar, Ctrl+Z to undo. Cmd+K for every command. Work autosaves to the library."
             : "Drop a .gp3/.gp4/.gp5/.gpx/.gp file anywhere to import it. Click a note to seek. Drag to select a loop region, then press LOOP. NEW starts an editable score. Cmd+K for every command."}
       </p>
 

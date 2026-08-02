@@ -266,12 +266,17 @@ before the importers rather than during them.
    sounding notes — voices 35 to 39 — because every index past the end of the
    default list is silent. The fix is for the tex we generate to declare its own
    articulation list. Until then a drum-only file stays play-only and says so.
-2. **Chords.** No chord entity, so chord diagrams and chord symbols are dropped.
-   Blocks chord charts, Nashville numbers, and a large slice of GP and MusicXML
-   fidelity.
-3. **Lyrics and text.** No beat text, no lyric line, no section names. Named in the
-   corpus report already. Blocks MusicXML round-tripping and anything a singer
-   would use.
+2. **Chords.** ~~No chord entity, so chord diagrams and chord symbols are
+   dropped.~~ Done. `Beat.chord` carries the symbol as typed ("Am7", "C/G"),
+   parsed on demand by `core/harmony`; it survives alphaTex (as `ch`), MusicXML
+   (as `<harmony>`, both directions), and ASCII tab (a chord row over the staff).
+   Chord *diagrams* — fingering pictures — are still reported as dropped;
+   the symbol is the entity, the picture is a rendering.
+3. **Lyrics and text.** ~~No beat text, no lyric line, no section names.~~ Done.
+   `Beat.lyric` and `Bar.section` are ops like everything else, and they ride
+   alphaTex (`lyrics`, `\section`), MusicXML (`<lyric>`, rehearsal marks), and
+   ASCII export. `fixtures/11-songwriting.altex` holds all three layers through
+   every oracle.
 
 Each is a model addition, which means an op-log addition, which means inverse ops
 and convergence tests — the discipline is established and the cost is predictable.
@@ -302,8 +307,11 @@ Value per unit of risk, same as STANDALONE.md.
 8. **Guitar Pro import**, ours rather than alphaTab's. Weeks, deliberately last:
    it is the one with the largest real corpus to be graded against, and the harness
    should be mature before it is attempted.
-9. **Chords and lyrics in the model**, then the long tail: PowerTab, TuxGuitar,
-   drum tab, chord charts, historical tablature.
+9. ~~**Chords and lyrics in the model.**~~ Shipped, out of order, because the
+   songwriting editor needed them: chords, lyrics and sections are ops, round-trip
+   alphaTex and MusicXML through independent readers, and render in the ASCII
+   export. The long tail remains: PowerTab, TuxGuitar, drum tab, chord charts as
+   an *import* (the model can hold them now), historical tablature.
 
 Every importer ships with fixtures in `fixtures/`, a round-trip entry in `pnpm
 corpus`, and an honest `unsupported` report. Every exporter ships with a re-import

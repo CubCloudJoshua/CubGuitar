@@ -26,6 +26,8 @@ interface CommandDeps {
   startPerforming: () => void;
   /** Arranges the caret's staff for a fretted instrument; see core/arrange. */
   onArrange: (kind: "guitar" | "bass") => void;
+  /** Generates the accompaniment track from the chord chart; see core/compose. */
+  onCompose: (pattern: "sustain" | "strum" | "arpeggio") => void;
   /** The microphone, graded against the score; see listen/useListening. */
   listening: { on: boolean; toggle: () => void };
   /** A recording playing with the score; see sync/useRecording. */
@@ -144,6 +146,31 @@ export function useCommands(deps: CommandDeps): Command[] {
           run: () => deps.onArrange("bass"),
         });
       }
+      // Songwriting. Compose is offered only once there is a chart to play, and each
+      // pattern is its own command so the palette teaches what the three words mean.
+      const hasChart = editor.score.tracks.some((t) =>
+        t.bars.some((b) => b.voices.some((v) => v.beats.some((x) => x.chord !== undefined))),
+      );
+      if (hasChart) {
+        for (const [pattern, label] of [
+          ["strum", "Compose accompaniment: strummed chords"],
+          ["sustain", "Compose accompaniment: held chords"],
+          ["arpeggio", "Compose accompaniment: arpeggiated"],
+        ] as const) {
+          add({ id: `compose-${pattern}`, title: label, section: "Songwriting", run: () => deps.onCompose(pattern) });
+        }
+      }
+      // The bridge from chart to tab: the chord in force at the caret, written into
+      // the beat as playable notes.
+      if (editor.chordBeforeCursor !== null || hasChart) {
+        add({
+          id: "insert-voicing",
+          title: "Insert chord voicing at the caret",
+          section: "Songwriting",
+          run: () => void editor.insertVoicing(),
+        });
+      }
+
       // Offered during a live session too: undo sends the inverse of this
       // client's own edit through the server, so it converges like any batch.
       // Practice, not playback: this changes what the app is doing with your
