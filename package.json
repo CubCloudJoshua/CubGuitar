@@ -15,7 +15,8 @@
     "e2e": "node e2e/run.mjs",
     "timing": "node tools/timing-check.mjs",
     "midi": "node tools/midi-check.mjs",
-    "musicxml": "node tools/musicxml-check.mjs"
+    "musicxml": "node tools/musicxml-check.mjs",
+    "editperf": "node tools/edit-perf.mjs"
   },
   "engines": {
     "node": ">=22"
