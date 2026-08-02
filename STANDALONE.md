@@ -84,6 +84,38 @@ that will be quoted most often.
 
 ## 3. Phase R — our own engraver
 
+> **Measured, and it moved this up the list.** Phase R was filed as a licence
+> project. It is not: it is the ceiling on the editor. A keystroke costs 20ms on the
+> four-bar demo and 1,776ms on a 274-bar song, and `pnpm editperf` now fails the build
+> on that. The cost is alphaTab re-laying-out the score, not our alphaTex round trip —
+> parsing Stairway's tex is ~10ms of a 967ms keystroke.
+>
+> Three levers were tried and measured, all of them alphaTab's own:
+>
+> | | Stairway (166 bars) | Achilles (274 bars) |
+> | --- | --- | --- |
+> | Whole-score render | 975ms | 1,934ms |
+> | `RenderHints.firstChangedMasterBar` at bar 150 | 538ms | 1,620ms |
+> | `display.startBar` + `barCount`, a 32-bar window | 498ms | 780ms |
+>
+> The best any of them reaches is 478ms, against a 100ms budget, and the render hint
+> buys nothing at all for an edit near the top of a score — which is where people
+> start. A 32-bar window on a 274-bar score still costs 60% more than the same window
+> on a 166-bar one, so a large part of the cost scales with the whole document however
+> little of it is drawn.
+>
+> Wiring the render hint was tried and reverted: `api.renderScore` does not raise
+> `scoreLoaded`, so the track list went stale after a removal (`pnpm e2e tracks` caught
+> it), and a second render path with its own failure modes is not worth 20% on a number
+> that has to come down by 5×.
+>
+> One stone unturned: alphaTab renders in "partials" and exposes `renderLazyPartial`,
+> so there may be a lazy off-screen path the three settings above do not reach. Worth
+> an hour before committing to the engraver, not more.
+>
+> What an engraver has to beat is therefore 478ms, and what it has to reach is 100ms.
+> The 20ms on four bars says the rest of the stack is not the problem.
+
 The big one. Split it, because tablature and standard notation are different
 problems wearing the same hat.
 

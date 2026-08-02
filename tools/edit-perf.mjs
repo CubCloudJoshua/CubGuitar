@@ -13,6 +13,12 @@
  * time and time into the editor come with it, since both scale the same way and both
  * would otherwise regress unnoticed.
  *
+ * The budget is not currently met on real songs and that is the point of having it.
+ * Measured against alphaTab's own levers — its live-editing render hint and its
+ * bar-window settings — the floor is around 480ms, against a 100ms budget. See
+ * STANDALONE.md §3: this number is the case for our own engraver, and this tool is how
+ * that case will be judged when one exists.
+ *
  * Usage: pnpm build && pnpm editperf
  * Exits non-zero if a keystroke on any score is slower than the budget below.
  */
