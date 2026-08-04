@@ -5,7 +5,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toAlphaTex, type Score as CoreScore } from "@cubscore/core";
-import { fromAlphaTab, fromAscii, fromMusicXml, type ImportReport } from "@cubscore/formats";
+import { fromAlphaTab, fromAscii, fromMidiScore, fromMusicXml, type ImportReport } from "@cubscore/formats";
 import type { AlphaTabController } from "../useAlphaTab";
 import type { EditorController } from "../editor/useEditor";
 import { deleteEntry, getEntry, libraryOwner, listEntries, newId, putEntry, type LibraryEntry } from "./db";
@@ -402,6 +402,50 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
         pendingRef.current = { id: newId(), format: "altex", bytes: null, tex, fileName: file.name, addedAt: Date.now() };
         loadTex(tex);
         setLibraryOpen(false);
+        return;
+      }
+
+      /**
+       * A Standard MIDI File as editable notation.
+       *
+       * The one import here whose hard part is not parsing. A MIDI file states pitches
+       * and times and nothing about notation: no bar lines a reader would agree with, no
+       * note values, no idea which channel is which instrument, and for a guitar part no
+       * position on the neck. `fromMidiScore` decides all of that — quantising against
+       * the file's own tempo and meter maps, splitting parts by track and channel, and
+       * fingering the fretted ones — so what lands in the editor is a score rather than
+       * a piano roll.
+       *
+       * Down the same alphaTex path as every other import, so it plays, autosaves and
+       * becomes editable with no new machinery. Anything guessed is in the notice: a
+       * fretted tuning General MIDI could not state, a channel that changed instrument,
+       * bends that were not reconstructed, drum notation that is still a gap.
+       */
+      if (/\.(mid|midi)$/i.test(file.name)) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        try {
+          const { score, report } = fromMidiScore(bytes, { title: file.name.replace(/\.[^.]+$/, "") });
+          setImportNotice({
+            unsupported: report.unsupported,
+            trackCount: report.trackCount,
+            barCount: report.barCount,
+            noteCount: report.noteCount,
+          });
+          // A file with no notes leaves the user where they were: loading an empty score
+          // over what they were looking at is a worse answer than the notice alone.
+          if (report.noteCount === 0) return;
+          const tex = toAlphaTex(score);
+          pendingRef.current = { id: newId(), format: "altex", bytes: null, tex, fileName: file.name, addedAt: Date.now() };
+          loadTex(tex);
+          setLibraryOpen(false);
+        } catch (cause) {
+          setImportNotice({
+            unsupported: [cause instanceof Error ? cause.message : "This file could not be read as MIDI."],
+            trackCount: 0,
+            barCount: 0,
+            noteCount: 0,
+          });
+        }
         return;
       }
 

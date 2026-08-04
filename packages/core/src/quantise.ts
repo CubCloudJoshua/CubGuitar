@@ -91,6 +91,15 @@ export interface QuantiseOptions {
   grid?: number | "auto";
   /** Notes starting within this of each other are one chord, not a sequence. */
   chordWindowSeconds?: number;
+  /**
+   * The moment tick 0 corresponds to. Defaults to the first note's onset.
+   *
+   * Needed whenever more than one part is quantised into the same score. Each call
+   * anchors on its own first note by default, so a bass entering a bar after the guitar
+   * would be pulled back to tick 0 and the two parts would play together that were
+   * never together. Passing a shared origin keeps them aligned.
+   */
+  originSeconds?: number;
   instrument?: Instrument;
   title?: string;
   trackName?: string;
@@ -622,7 +631,7 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
   // 30ms early moves all the others 30ms late and the report blames them for it. The
   // offset that minimises total residual is the grid a reader would infer, and it
   // costs one pass over a few dozen candidate offsets.
-  const origin = groups[0]?.startSeconds ?? 0;
+  const origin = options.originSeconds ?? groups[0]?.startSeconds ?? 0;
   const measured = groups.map((group) => ruler.ticksAt(group.startSeconds - origin));
   const PHASE_STEPS = 32;
   let phase = 0;

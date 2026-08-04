@@ -54,16 +54,23 @@ arriving for a string already ringing) and the playback engine in Phase P will h
 it too. That is the shape to look for: a correction that belongs to the model, not
 to the format that exposed it.
 
-### 1.2 MIDI files, in
+### 1.2 MIDI files, in — **shipped**
 
 Harder than out, and interesting because the hard part is musical rather than
 technical. Parsing an SMF is an afternoon. Turning a stream of pitches into
 *tablature* is the real problem: every pitch is playable in several places on the
 neck, and choosing among them is a fingering decision.
 
-- Quantisation. A MIDI file recorded from a keyboard has no bar lines and no
-  intended note durations. Snapping to a grid needs a tolerance and a tempo, and it
-  needs to be visible and adjustable rather than silently applied.
+Built as `packages/formats/src/from-midi-score.ts`: parsing is `from-midi.ts`,
+notation is `core/quantise.ts`, and what lives in the join is the part neither can do —
+deciding what the parts are.
+
+- ~~Quantisation.~~ **Built**, and built for the transcription pipeline rather than for
+  this, which is why it is in core: both callers hand it pitches with onsets and want a
+  `Score`. Grid, tempo and meter are all callable inputs, and the grid defaults to being
+  chosen from the material — a fixed 1/16 default reads a fast passage as chords, which
+  `pnpm transcribe` caught. Adjustable in the sense that matters (the caller states what
+  it knows); not yet exposed as a control in the import UI.
 - ~~Pitch to (string, fret).~~ **Built**: `packages/core/src/fingering.ts`. A
   shortest path over hand position rather than a lookup — movement, stretch and open
   strings, with the weights stated and adjustable. It replaced the naive
@@ -71,8 +78,18 @@ neck, and choosing among them is a fingering decision.
   rule that sends a hand from fret 12 to fret 2 and back between consecutive notes.
   Four things share it: the reader, MIDI import, MusicXML import, and arranging a
   keyboard or vocal line for guitar.
-- Track splitting. A type-0 file is one track holding everything; a guitar part and
-  a bass part have to be separated by channel and range.
+- ~~Track splitting.~~ **Built.** By track *and* channel, which is right under all
+  three conventions in the wild: a notation program's one track per staff, a DAW's
+  several channels on one track, and a format-0 file where everything is on track 0 and
+  the channel is the only separator. Instrument comes from the program number — guitar
+  and bass programs become fretted tracks, channel 10 becomes drums by specification,
+  and everything else stays `pitched` with its program intact rather than being guessed
+  onto a neck nobody asked for.
+
+Two conventions our own writer never produces are covered by hand-built files in the
+tests, because a round trip can only ever exercise our own habits: a format-0 file, and
+a division other than the 960 we work in. Both survived mutation testing until those
+files existed.
 
 This is also the first genuinely AI-shaped problem in the product: optimal
 fingering is exactly the kind of thing a model can be trained or prompted to do
@@ -299,14 +316,17 @@ Value per unit of risk, same as STANDALONE.md.
 5. **Percussion in the model.** Weeks. Unblocks four separate things and closes the
    gap our own import reports name most often. Now the largest remaining hole: MusicXML
    writes a drum part as pitched notes and reports it, which is honest and not right.
-6. **MIDI file import**. The fingering half was already done, and ~~quantisation~~ is
-   now done too: `packages/core/src/quantise.ts` takes pitches with onsets in seconds
-   and returns a `Score`, built for the transcription pipeline and graded by `pnpm
-   transcribe`. It is the same input a MIDI file gives us, which is why it lives in
-   core rather than in the transcription plumbing. What remains for MIDI import
-   specifically is **track splitting** — deciding which channel is which instrument —
-   plus honouring a file's tempo and meter *maps* rather than its first of each, which
-   the quantiser does not do yet and reports when it matters.
+6. ~~**MIDI file import**.~~ Shipped. The fingering half was already done; quantisation
+   landed with the transcription pipeline (`packages/core/src/quantise.ts`), which takes
+   the same input a MIDI file gives us — pitches with onsets — and returns a `Score`.
+   Tempo and meter *maps* landed with it, so a file's own bar structure is honoured
+   rather than its first signature repeated. Track splitting is by track *and* channel,
+   which is right for a notation program's one-track-per-staff, a DAW's several
+   channels on a track, and format 0's everything-on-track-0. Graded by
+   `from-midi-score.test.ts` through our own writer, plus hand-built files for the two
+   conventions our writer never produces: a format-0 file, and a division other than
+   ours. What remains is the long tail — reconstructing bends from pitch-bend events,
+   and drum notation, which is the same gap named in item 1.
 7. **Web MIDI**: pedals, then note entry, then clock sync. Days each, and the
    hexaphonic-pickup path is a genuinely differentiated demo.
 8. **Guitar Pro import**, ours rather than alphaTab's. Weeks, deliberately last:
