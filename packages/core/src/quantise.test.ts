@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyBatch,
+  createBar,
   createScore,
   createTrack,
   duration,
@@ -25,6 +26,7 @@ import {
   type OpBatch,
   type OpKind,
   type Score,
+  type TimeSignature,
 } from "./index.js";
 import { chooseGrid, decomposeTicks, estimateTempo, quantise, type DetectedNote } from "./quantise.js";
 import { QUARTER_TICKS } from "./timeline.js";
@@ -618,6 +620,212 @@ describe("the fretboard", () => {
     expect(frets.every((f) => f >= 0)).toBe(true);
     const jumps = frets.slice(1).map((f, i) => Math.abs(f - frets[i]!));
     expect(Math.max(...jumps)).toBeLessThanOrEqual(5);
+  });
+});
+
+describe("tempo and meter that change through the piece", () => {
+  /** Bar lengths as written, so a changing meter is visible as changing sums. */
+  const lengths = (score: Score) => barSums(score);
+
+  it("gives each bar the length its own meter asks for", () => {
+    // 4/4 for two bars, then 3/4. Eight quarter notes, so the third bar is the 3/4 one.
+    const notes: DetectedNote[] = Array.from({ length: 10 }, (_, i) => ({
+      pitch: 64,
+      startSeconds: i * 0.5,
+      durationSeconds: 0.5,
+    }));
+    const { score } = quantise(notes, {
+      bpm: 120,
+      meter: { beats: 4, beatValue: 4 },
+      meters: [
+        { atTicks: 0, beats: 4, beatValue: 4 },
+        { atTicks: QUARTER_TICKS * 8, beats: 3, beatValue: 4 },
+      ],
+    });
+    expect(lengths(score).slice(0, 3)).toEqual([
+      QUARTER_TICKS * 4,
+      QUARTER_TICKS * 4,
+      QUARTER_TICKS * 3,
+    ]);
+  });
+
+  it("states a signature only where it changes", () => {
+    const notes: DetectedNote[] = Array.from({ length: 10 }, (_, i) => ({
+      pitch: 64,
+      startSeconds: i * 0.5,
+      durationSeconds: 0.5,
+    }));
+    const { score } = quantise(notes, {
+      bpm: 120,
+      meters: [
+        { atTicks: 0, beats: 4, beatValue: 4 },
+        { atTicks: QUARTER_TICKS * 8, beats: 3, beatValue: 4 },
+      ],
+    });
+    const stated = score.tracks[0]!.bars.map((b) =>
+      b.timeSignature ? `${b.timeSignature.beats}/${b.timeSignature.beatValue}` : null,
+    );
+    expect(stated[0]).toBe("4/4");
+    expect(stated[1]).toBeNull();
+    expect(stated[2]).toBe("3/4");
+  });
+
+  it("places a note after a tempo change where the change puts it", () => {
+    // 120 for one bar (2 seconds), then 60. At 60 a quarter note is a whole second, so
+    // the note one second after the change is the second quarter of bar 2 — tick 4800,
+    // not tick 5760 as a constant 120 would have made it.
+    const notes: DetectedNote[] = [
+      { pitch: 64, startSeconds: 0, durationSeconds: 0.5 },
+      { pitch: 65, startSeconds: 2, durationSeconds: 1 },
+      { pitch: 67, startSeconds: 3, durationSeconds: 1 },
+    ];
+    const { score } = quantise(notes, {
+      bpm: 120,
+      tempos: [
+        { atTicks: 0, bpm: 120 },
+        { atTicks: QUARTER_TICKS * 4, bpm: 60 },
+      ],
+    });
+    // Read back through the timeline, which applies the same tempo map from the bars.
+    const back = timeline(score).notes;
+    expect(back.map((n) => Math.round(n.startSeconds * 1000))).toEqual([0, 2000, 3000]);
+  });
+
+  it("writes each tempo onto the bar it starts in, and only when it changes", () => {
+    const notes: DetectedNote[] = Array.from({ length: 12 }, (_, i) => ({
+      pitch: 64,
+      startSeconds: i * 0.5,
+      durationSeconds: 0.5,
+    }));
+    const { score } = quantise(notes, {
+      bpm: 120,
+      tempos: [
+        { atTicks: 0, bpm: 120 },
+        { atTicks: QUARTER_TICKS * 4, bpm: 90 },
+      ],
+    });
+    const written = score.tracks[0]!.bars.map((b) => b.tempoBpm ?? null);
+    expect(written[0]).toBe(120);
+    expect(written[1]).toBe(90);
+    // Not restated on every bar after the change, which would be noise in the score.
+    expect(written[2]).toBeNull();
+  });
+
+  it("recovers a score that changes meter, which one meter could not", () => {
+    // The limitation `pnpm transcribe` flags on both real corpus files. Built here at a
+    // size that can be read: 4/4, 3/4, 4/4, with a note on every beat.
+    // Built from `createBar` per meter rather than through a set-signature op:
+    // `createTrack` pre-fills a bar with one rest per beat of *its* meter, so marking an
+    // existing 4/4 bar as 3/4 leaves four beats under a three-beat signature — a bar
+    // that disagrees with itself, whose real length is its contents. The timeline
+    // reports the meter change while the bar still occupies four beats, and a test
+    // built that way is asserting against a malformed score.
+    const meters: TimeSignature[] = [
+      { beats: 4, beatValue: 4 },
+      { beats: 3, beatValue: 4 },
+      { beats: 4, beatValue: 4 },
+    ];
+    const withMeter: Score = {
+      ...createScore("Mixed meter"),
+      tracks: [
+        {
+          id: "mm-track",
+          name: "Guitar",
+          instrument: frettedGuitar(),
+          bars: meters.map((m, i) => createBar(m, i === 0 || m.beats !== meters[i - 1]!.beats)),
+        },
+      ],
+    };
+    // One note on every beat of every bar: 4 + 3 + 4.
+    const kinds: OpKind[] = [];
+    for (const [b, bar] of withMeter.tracks[0]!.bars.entries()) {
+      for (const [i, beat] of bar.voices[0]!.beats.entries()) {
+        kinds.push({
+          type: "note.insert",
+          beatId: beat.id,
+          note: { id: `mm-${b}-${i}`, pitch: 64, string: 1, fret: 0, articulations: [] },
+        });
+      }
+    }
+    const original = applyBatch(withMeter, batch(...kinds));
+    const line = timeline(original);
+
+    const heard = detect(original);
+    const withoutMap = quantise(heard, { bpm: 120, instrument: frettedGuitar() });
+    const withMap = quantise(heard, {
+      bpm: 120,
+      instrument: frettedGuitar(),
+      meters: line.meterChanges.map((m) => ({
+        atTicks: m.tick,
+        beats: m.beats,
+        beatValue: m.beatValue,
+      })),
+    });
+
+    // The map reproduces the original's bar structure; a single meter cannot.
+    expect(lengths(withMap.score).slice(0, 3)).toEqual([
+      QUARTER_TICKS * 4,
+      QUARTER_TICKS * 3,
+      QUARTER_TICKS * 4,
+    ]);
+    expect(lengths(withoutMap.score)[1]).toBe(QUARTER_TICKS * 4);
+
+    // And every onset comes back where it started, which is the claim that matters.
+    const want = line.notes.map((n) => Math.round(n.startSeconds * 1000));
+    const got = timeline(withMap.score).notes.map((n) => Math.round(n.startSeconds * 1000));
+    expect(got).toEqual(want);
+  });
+
+  it("ignores a map that starts after the music and still covers the first note", () => {
+    // A file whose first tempo mark is late, which is a real thing MIDI files do.
+    const notes: DetectedNote[] = [0, 0.5, 1].map((startSeconds) => ({
+      pitch: 64,
+      startSeconds,
+      durationSeconds: 0.5,
+    }));
+    const { score, report } = quantise(notes, {
+      bpm: 100,
+      tempos: [{ atTicks: QUARTER_TICKS * 8, bpm: 140 }],
+    });
+    // The stated tempo fills the gap before the map's first entry.
+    expect(score.tracks[0]!.bars[0]!.tempoBpm).toBe(100);
+    expect(report.notesPlaced).toBe(3);
+  });
+
+  it("discards a nonsense map entry rather than writing a bar of length zero", () => {
+    // A map from a file is arbitrary bytes from wherever the user got it: a zero
+    // denominator or a zero tempo is a real thing to receive. The music has to run
+    // *past* the bad entry for this to test anything — eight notes so half of them fall
+    // in the region the junk governs, since a bad entry nothing reaches is harmless
+    // whether it was filtered or not.
+    const notes: DetectedNote[] = [0, 0.5, 1, 1.5, 2, 2.5, 3, 3.5].map((startSeconds) => ({
+      pitch: 64,
+      startSeconds,
+      durationSeconds: 0.5,
+    }));
+    const { score, report } = quantise(notes, {
+      bpm: 120,
+      meters: [
+        { atTicks: 0, beats: 4, beatValue: 4 },
+        { atTicks: QUARTER_TICKS * 4, beats: 0, beatValue: 0 },
+      ],
+      tempos: [
+        { atTicks: 0, bpm: 120 },
+        { atTicks: QUARTER_TICKS * 4, bpm: 0 },
+      ],
+    });
+    // A zero tempo makes every later onset convert to the same tick, and a zero
+    // denominator makes a bar of length NaN. Both are dropped, so the stated tempo and
+    // meter carry through and the eight notes stay eight notes in whole bars.
+    expect(report.notesPlaced).toBe(8);
+    expect(barSums(score)).toEqual(score.tracks[0]!.bars.map(() => QUARTER_TICKS * 4));
+    // Positions, not just the count. A zero tempo collapses every onset past it onto
+    // one tick, and those notes then merge into a single chord — which keeps the count
+    // at eight while destroying the rhythm. Only the positions catch that.
+    expect(timeline(score).notes.map((n) => Math.round(n.startSeconds * 1000))).toEqual([
+      0, 500, 1000, 1500, 2000, 2500, 3000, 3500,
+    ]);
+    expect(report.chordsFormed).toBe(0);
   });
 });
 

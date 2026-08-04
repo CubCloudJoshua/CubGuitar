@@ -35,6 +35,8 @@
  * VALID  fraction of written fingerings that actually sound their own pitch. Gated
  * ERR    mean distance from where a recovered note should have been
  * GRID   the subdivision chosen from the material
+ * BARS   bars written against bars the original plays. Equal means the tempo and
+ *        meter maps reproduced the original's structure
  * MERGED distinct onsets the grid still could not separate, so they became chords
  * TRIP   onsets a triplet would have fitted better, which we do not write yet
  *
@@ -186,14 +188,19 @@ async function main() {
     console.log("");
     console.log(
       "SCORE".padEnd(34) +
-        "JIT  NOTES  PITCH  FINGER  VALID  ERR    GRID  MERGED  TRIP  NOTE",
+        "JIT  NOTES  PITCH  FINGER  VALID  ERR    GRID  BARS       MERGED  TRIP  NOTE",
     );
     console.log("-".repeat(124));
     for (const r of rows) {
       const flags = [];
       if (r.leadInMs > 20) flags.push(`${r.leadInMs}ms lead-in dropped`);
-      if (r.tempoChanges > 1) flags.push(`${r.tempoChanges} tempos, 1 written`);
-      if (r.meterChanges > 1) flags.push(`${r.meterChanges} meters, 1 written`);
+      // The bar count is how you see whether the meter map was honoured. It used to
+      // say "N meters, 1 written", which stopped being true once maps landed; a count
+      // of what the source *contains* is not a finding, and a structure we failed to
+      // reproduce is.
+      if (r.barsRecovered !== r.barsTruth) {
+        flags.push(`${r.barsRecovered} bars for ${r.barsTruth}`);
+      }
       if (r.failed) flags.push(`FLOOR: ${r.failed}`);
       console.log(
         r.rel.padEnd(34) +
@@ -204,6 +211,7 @@ async function main() {
           pct(r.fingeringValid).padEnd(7) +
           `${r.onsetErrorMs}ms`.padEnd(7) +
           `1/${r.grid}`.padEnd(6) +
+          `${r.barsRecovered}/${r.barsTruth}`.padEnd(11) +
           String(r.mergedByGrid).padEnd(8) +
           String(r.tripletsWanted).padEnd(6) +
           flags.join("; "),

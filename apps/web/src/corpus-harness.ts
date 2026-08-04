@@ -792,16 +792,37 @@ async function transcribe(trigger: () => void, jitterMs: number): Promise<Transc
   const detected: DetectedNote[] = truth.map((n) => ({
     pitch: n.pitch,
     startSeconds: Math.max(0, n.startSeconds + (nextUnit() * 2 - 1) * jitterSeconds),
-    // Length is the least reliable thing a detector reports — a decaying string has
-    // no defined end — so it is jittered harder than the onset.
-    durationSeconds: Math.max(0.02, n.durationSeconds * (1 + (nextUnit() * 2 - 1) * 0.3)),
+    // Length is the least reliable thing a detector reports — a decaying string has no
+    // defined end — so it is jittered harder than the onset, but *scaled by the same
+    // knob*. It used to be a flat 30% regardless, which meant the 0ms row was not the
+    // clean arithmetic check this harness claims it is: an inflated final note pushed
+    // past the last bar line and the transcription grew a bar out of the harness's own
+    // noise. At 0ms the input is now exact, so a 0ms discrepancy is ours.
+    durationSeconds: Math.max(
+      0.02,
+      n.durationSeconds * (1 + (nextUnit() * 2 - 1) * (jitterMs / 40) * 0.3),
+    ),
   }));
 
   const bpmTruth = line.tempoChanges[0]?.bpm ?? 120;
   const meter = line.meterChanges[0];
+  // The maps are handed over because a *file* states them. This models MIDI import
+  // rather than audio transcription: a detector listening to a recording knows neither
+  // map, and inferring where a piece changes meter from onsets alone is its own
+  // problem. Passing them here measures what the notation stage does when the
+  // structure is known, which is the half a wrong bar length would otherwise hide.
+  //
+  // Ticks are rebased to the first note, since that is where a transcription starts.
+  const firstTick = truth[0]?.startTicks ?? 0;
   const { score: recovered, report } = quantise(detected, {
     bpm: bpmTruth,
     ...(meter ? { meter: { beats: meter.beats, beatValue: meter.beatValue } } : {}),
+    tempos: line.tempoChanges.map((t) => ({ atTicks: t.tick - firstTick, bpm: t.bpm })),
+    meters: line.meterChanges.map((m) => ({
+      atTicks: m.tick - firstTick,
+      beats: m.beats,
+      beatValue: m.beatValue,
+    })),
     instrument: track.instrument,
   });
 
@@ -819,6 +840,13 @@ async function transcribe(trigger: () => void, jitterMs: number): Promise<Transc
   // recovered perfectly, which is the metric being wrong rather than the code.
   const truthOrigin = truth[0]?.startSeconds ?? 0;
   const gotOrigin = got[0]?.startSeconds ?? 0;
+
+  // How many of the score's bars the first track's notes reach into.
+  const firstSounding = truthOrigin;
+  const lastSounding = truth.reduce((max, n) => Math.max(max, n.startSeconds + n.durationSeconds), 0);
+  const barsSpanned = line.bars.filter(
+    (b) => b.endSeconds > firstSounding + 1e-6 && b.startSeconds < lastSounding - 1e-6,
+  ).length;
 
   // Matched greedily on pitch within a tolerance of the true onset. Half a beat is
   // generous on purpose: this measures whether the note is *in the right place in the
@@ -890,10 +918,16 @@ async function transcribe(trigger: () => void, jitterMs: number): Promise<Transc
     bpmTruth,
     tempoChanges: line.tempoChanges.length,
     meterChanges: line.meterChanges.length,
-    // Played, not written: `timeline()` expands repeats, so the truth this is graded
-    // against is longer than the score on the page. Comparing the recovered bar count
-    // against the *written* one made every score with a repeat look 20% too long.
-    barsTruth: line.bars.length,
+    // Bars the truth notes actually *span*, not every bar the score plays.
+    //
+    // A transcription covers the music it heard: it starts at the first note and ends at
+    // the last. A score whose first track rests for the last forty bars plays those bars
+    // and the transcription rightly has nothing to say about them, so the total played
+    // count is the wrong denominator — it reported one file as writing 118 bars for 166
+    // when its guitar part is 118 bars long. (Played rather than written is still the
+    // right basis: `timeline()` expands repeats, and comparing against the written count
+    // made every score with a repeat look 20% too long.)
+    barsTruth: barsSpanned,
     barsRecovered: report.barsWritten,
     leadInMs: Math.round((truthOrigin - gotOrigin) * 1000),
   };

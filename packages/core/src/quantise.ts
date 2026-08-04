@@ -66,6 +66,21 @@ export interface QuantiseOptions {
   bpm?: number;
   meter?: TimeSignature;
   /**
+   * Tempo and meter as they change through the piece, in ticks from the first note.
+   *
+   * Optional because the two callers know different things. A MIDI file states both
+   * maps exactly, so import passes them and gets the file's own bar structure back. A
+   * detector listening to audio knows neither, so transcription passes at most a
+   * single stated tempo — inferring where a piece changes meter from onsets alone is a
+   * separate problem, and guessing would put bar lines in places the music does not
+   * have them.
+   *
+   * `bpm` and `meter` remain the single-value form, and are what the first entry of
+   * each map defaults to when a map starts later than tick 0.
+   */
+  tempos?: readonly TempoPoint[];
+  meters?: readonly MeterPoint[];
+  /**
    * Finest straight subdivision to snap to, as a note denominator: 16 means
    * sixteenth notes. Coarser is more readable and less faithful.
    *
@@ -280,6 +295,160 @@ export function decomposeTicks(span: number): Array<{ duration: Duration; dots: 
   return out;
 }
 
+/** A tempo taking effect at a tick, measured from the transcription's first note. */
+export interface TempoPoint {
+  atTicks: number;
+  bpm: number;
+}
+
+/** A meter taking effect at a tick. Only bar starts are meaningful positions. */
+export interface MeterPoint {
+  atTicks: number;
+  beats: number;
+  beatValue: number;
+}
+
+/**
+ * Seconds and ticks, convertible in both directions across a changing tempo.
+ *
+ * With one tempo this is a multiplication and would not need a type. With a tempo map
+ * it is piecewise linear, and every conversion has to know which segment it is in —
+ * so the cumulative seconds at each tempo change are computed once and both
+ * directions read off the same table. Getting the two directions from one table is
+ * the point: derived separately they drift, and a note's position would depend on
+ * which way it was last converted.
+ *
+ * A caller with no map gets a single-segment ruler, which is the old arithmetic
+ * exactly.
+ */
+interface Ruler {
+  ticksAt(seconds: number): number;
+  secondsAt(ticks: number): number;
+  /** Seconds per tick local to a position, for turning a tick error into a duration. */
+  rateAt(ticks: number): number;
+  bpmAt(ticks: number): number;
+}
+
+function tempoRuler(tempos: readonly TempoPoint[], fallbackBpm: number): Ruler {
+  const points = [...tempos]
+    .filter((t) => Number.isFinite(t.atTicks) && Number.isFinite(t.bpm) && t.bpm > 0)
+    .sort((a, b) => a.atTicks - b.atTicks);
+  // The map must cover tick 0 or the first note has no tempo. A map that starts later
+  // is padded with the stated (or default) tempo rather than rejected.
+  if (points.length === 0 || (points[0]?.atTicks ?? 0) > 0) {
+    points.unshift({ atTicks: 0, bpm: fallbackBpm });
+  }
+  const rate = points.map((p) => 60 / p.bpm / QUARTER_TICKS);
+  const secondsAtPoint: number[] = [0];
+  for (let i = 1; i < points.length; i += 1) {
+    const span = (points[i]?.atTicks ?? 0) - (points[i - 1]?.atTicks ?? 0);
+    secondsAtPoint[i] = (secondsAtPoint[i - 1] ?? 0) + span * (rate[i - 1] ?? 0);
+  }
+
+  /** Index of the segment containing a tick. */
+  const segmentAtTicks = (ticks: number): number => {
+    let lo = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      if ((points[i]?.atTicks ?? 0) <= ticks) lo = i;
+      else break;
+    }
+    return lo;
+  };
+  const segmentAtSeconds = (seconds: number): number => {
+    let lo = 0;
+    for (let i = 1; i < points.length; i += 1) {
+      if ((secondsAtPoint[i] ?? 0) <= seconds) lo = i;
+      else break;
+    }
+    return lo;
+  };
+
+  return {
+    ticksAt(seconds) {
+      const i = segmentAtSeconds(seconds);
+      const step = rate[i] ?? 0;
+      if (step === 0) return points[i]?.atTicks ?? 0;
+      return (points[i]?.atTicks ?? 0) + (seconds - (secondsAtPoint[i] ?? 0)) / step;
+    },
+    secondsAt(ticks) {
+      const i = segmentAtTicks(ticks);
+      return (secondsAtPoint[i] ?? 0) + (ticks - (points[i]?.atTicks ?? 0)) * (rate[i] ?? 0);
+    },
+    rateAt(ticks) {
+      return rate[segmentAtTicks(ticks)] ?? 0;
+    },
+    bpmAt(ticks) {
+      return points[segmentAtTicks(ticks)]?.bpm ?? fallbackBpm;
+    },
+  };
+}
+
+/**
+ * Where every bar starts and how long it is, across a changing meter.
+ *
+ * Bars are grown on demand rather than precomputed, because how many there are is not
+ * known until the music has been written into them. A meter change is honoured only at
+ * a bar line, which is what a meter change means: a 3/4 marked mid-bar is a file that
+ * disagrees with itself, and the next bar is where a reader would apply it.
+ */
+function meterRuler(meters: readonly MeterPoint[], fallback: TimeSignature) {
+  const points = [...meters]
+    .filter((m) => Number.isFinite(m.atTicks) && m.beats > 0 && m.beatValue > 0)
+    .sort((a, b) => a.atTicks - b.atTicks);
+  if (points.length === 0 || (points[0]?.atTicks ?? 0) > 0) {
+    points.unshift({ atTicks: 0, beats: fallback.beats, beatValue: fallback.beatValue });
+  }
+  const meterAt = (tick: number): TimeSignature => {
+    let found = points[0]!;
+    for (const point of points) {
+      if (point.atTicks <= tick) found = point;
+      else break;
+    }
+    return { beats: found.beats, beatValue: found.beatValue };
+  };
+  const lengthOf = (meter: TimeSignature) =>
+    Math.max(1, Math.round((WHOLE_TICKS * meter.beats) / meter.beatValue));
+
+  /** Bar starts, extended as far as asked. `starts[i]` is bar i's first tick. */
+  const starts: number[] = [0];
+  const metersByBar: TimeSignature[] = [meterAt(0)];
+  const growTo = (barIndex: number) => {
+    while (starts.length <= barIndex) {
+      const previous = starts.length - 1;
+      const start = (starts[previous] ?? 0) + lengthOf(metersByBar[previous]!);
+      starts.push(start);
+      metersByBar.push(meterAt(start));
+    }
+  };
+  return {
+    /** The bar containing a tick, and how far into it the tick is. */
+    at(tick: number): { index: number; offset: number; meter: TimeSignature; length: number } {
+      let index = 0;
+      for (;;) {
+        growTo(index + 1);
+        const next = starts[index + 1] ?? 0;
+        if (tick < next || index > 1_000_000) break;
+        index += 1;
+      }
+      const start = starts[index] ?? 0;
+      const meter = metersByBar[index]!;
+      return { index, offset: tick - start, meter, length: lengthOf(meter) };
+    },
+    meterOfBar(index: number): TimeSignature {
+      growTo(index);
+      return metersByBar[index] ?? fallback;
+    },
+    lengthOfBar(index: number): number {
+      growTo(index);
+      return lengthOf(metersByBar[index] ?? fallback);
+    },
+    startOfBar(index: number): number {
+      growTo(index);
+      return starts[index] ?? 0;
+    },
+  };
+}
+
 /** Subdivisions the auto grid will consider, coarsest first. */
 const GRID_CHOICES = [8, 16, 32] as const;
 
@@ -431,7 +600,11 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
     );
   }
 
-  const secondsPerTick = 60 / bpm / QUARTER_TICKS;
+  const ruler = tempoRuler(options.tempos ?? [], bpm);
+  const bars$ = meterRuler(options.meters ?? [], meter);
+  // The mean rate across the piece, for the one place a single number is wanted: the
+  // grid-fit threshold, which is a summary statistic and not a position.
+  const meanRate = 60 / bpm / QUARTER_TICKS;
   const gridTicks = Math.max(1, Math.round(WHOLE_TICKS / grid));
   // A triplet of the grid's own value, for the "would a tuplet have fitted?" count.
   const tripletTicks = Math.max(1, Math.round(gridTicks * (2 / 3)));
@@ -450,7 +623,7 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
   // offset that minimises total residual is the grid a reader would infer, and it
   // costs one pass over a few dozen candidate offsets.
   const origin = groups[0]?.startSeconds ?? 0;
-  const measured = groups.map((group) => (group.startSeconds - origin) / secondsPerTick);
+  const measured = groups.map((group) => ruler.ticksAt(group.startSeconds - origin));
   const PHASE_STEPS = 32;
   let phase = 0;
   let phaseCost = Number.POSITIVE_INFINITY;
@@ -475,7 +648,7 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
   const snapped = groups.map((group, index) => {
     const rawTicks = (measured[index] ?? 0) - phase;
     const startTicks = Math.round(rawTicks / gridTicks) * gridTicks;
-    shifts.push(Math.abs(rawTicks - startTicks) * secondsPerTick);
+    shifts.push(Math.abs(rawTicks - startTicks) * ruler.rateAt(startTicks));
     // Would a triplet grid have caught this note markedly better? Measured, not
     // acted on: see the header on why tuplets are counted rather than guessed.
     const straightMiss = Math.abs(rawTicks - startTicks);
@@ -483,7 +656,11 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
     if (tripletMiss * 2 < straightMiss && straightMiss > gridTicks * 0.2) tripletsWanted += 1;
     return {
       startTicks,
-      soundingTicks: Math.max(0, group.durationSeconds / secondsPerTick),
+      soundingTicks: Math.max(
+        0,
+        ruler.ticksAt(group.startSeconds - origin + group.durationSeconds) -
+          ruler.ticksAt(group.startSeconds - origin),
+      ),
       pitches: group.pitches,
     };
   });
@@ -550,18 +727,33 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
   }
 
   // --- Stage 6: bars --------------------------------------------------------
-  const barTicks = Math.max(1, Math.round((WHOLE_TICKS * meter.beats) / meter.beatValue));
   const bars: Bar[] = [];
   const started = new Set<Bar>();
   let restsWritten = 0;
   let beatsWritten = 0;
   let notesPlaced = 0;
 
-  /** The bar covering a tick, creating any bars before it that nothing reached. */
-  const barAt = (tick: number): { bar: Bar; offset: number } => {
-    const index = Math.floor(tick / barTicks);
-    while (bars.length <= index) bars.push(createBar(meter, bars.length === 0));
-    return { bar: bars[index]!, offset: tick - index * barTicks };
+  /**
+   * The bar covering a tick, creating any bars before it that nothing reached.
+   *
+   * Bar lengths come from the meter ruler, so a piece that changes meter gets bars of
+   * the right size rather than the first meter's size repeated. Each bar states its own
+   * signature only where it differs from the one before, which is what the notation
+   * means and what every reader of ours expects.
+   */
+  const barAt = (tick: number): { bar: Bar; offset: number; length: number } => {
+    const found = bars$.at(tick);
+    while (bars.length <= found.index) {
+      const index = bars.length;
+      const barMeter = bars$.meterOfBar(index);
+      const previous = index === 0 ? null : bars$.meterOfBar(index - 1);
+      const changed =
+        previous === null ||
+        previous.beats !== barMeter.beats ||
+        previous.beatValue !== barMeter.beatValue;
+      bars.push(createBar(barMeter, changed));
+    }
+    return { bar: bars[found.index]!, offset: found.offset, length: found.length };
   };
 
   /**
@@ -601,8 +793,8 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
     let left = total;
     let counted = false;
     while (left > 0) {
-      const { bar, offset } = barAt(at);
-      const room = barTicks - offset;
+      const { bar, offset, length } = barAt(at);
+      const room = length - offset;
       const take = Math.min(room, left);
       const pieces = decomposeTicks(take);
       // A span too short to notate at all. Stopping is right: advancing without
@@ -657,8 +849,8 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
   // Pad the last bar so it is a whole bar. A part that stops mid-bar is not wrong
   // musically, but a bar whose beats do not sum to its meter breaks every consumer
   // that trusts the meter, starting with our own timeline.
-  const tail = cursor % barTicks;
-  if (tail > 0) write(cursor, barTicks - tail, null, null);
+  const closing = bars$.at(cursor);
+  if (closing.offset > 0) write(cursor, closing.length - closing.offset, null, null);
   if (bars.length === 0) bars.push(createBar(meter, true));
 
   // --- Result ---------------------------------------------------------------
@@ -669,9 +861,20 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
     bars,
   };
   // The tempo belongs on the score, or playing it back reports 120 and every
-  // measurement taken against it is wrong by the ratio.
+  // measurement taken against it is wrong by the ratio. A map is written onto the bar
+  // each change lands in — the nearest bar line at or before it, since a tempo marked
+  // mid-bar is not something our model holds — and only where it actually changes.
   const firstBar = bars[0];
-  if (firstBar) firstBar.tempoBpm = bpm;
+  if (firstBar) firstBar.tempoBpm = ruler.bpmAt(0);
+  let lastWritten = ruler.bpmAt(0);
+  for (const [index, bar] of bars.entries()) {
+    if (index === 0) continue;
+    const bpmHere = ruler.bpmAt(bars$.startOfBar(index));
+    if (bpmHere !== lastWritten) {
+      bar.tempoBpm = bpmHere;
+      lastWritten = bpmHere;
+    }
+  }
 
   const report: QuantiseReport = {
     bpm,
@@ -688,7 +891,7 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
     gridFit:
       shifts.length === 0
         ? 1
-        : shifts.filter((s) => s <= gridTicks * secondsPerTick * 0.1).length / shifts.length,
+        : shifts.filter((s) => s <= gridTicks * meanRate * 0.1).length / shifts.length,
     tripletsWanted,
     grid,
     mergedByGrid,
