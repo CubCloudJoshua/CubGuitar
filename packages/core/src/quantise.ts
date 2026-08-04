@@ -38,8 +38,31 @@
  * `report.tripletsWanted`. Guessing tuplet groups requires deciding where a group
  * starts and how many notes it spans, which changes the bar's arithmetic; getting
  * that wrong produces bars that do not add up, which is worse than a straight rhythm
- * a user can see is straight. The count says exactly what the omission costs, which
- * is what tells us whether to build it.
+ * a user can see is straight.
+ *
+ * ### The attempt, and what it measured
+ *
+ * That count reached 64 onsets on one real score at zero jitter, which is a large enough
+ * omission to be worth trying, so it was tried: decide straight-or-thirds one beat at a
+ * time, keep every group inside a single beat so the bar still sums to its meter, mark the
+ * beats with `Beat.tuplet`. Everything downstream already carries tuplets — `beatTicks`,
+ * alphaTex's `tu`, MusicXML's `<time-modification>`, the ASCII writer, both readers — so
+ * the work was contained to this file.
+ *
+ * It failed, and `pnpm transcribe` is what said so. Unit tests passed on clean triplet and
+ * shuffle material, and the real corpus regressed hard: a score at 100% note recovery and
+ * 332 of 332 bars fell to 37% and 150 bars. Three separate causes were found and fixed —
+ * a clamp that dragged onsets backwards onto positions already taken, a trigger that fired
+ * on noise once timing error exceeded about 20ms, and a cursor that advanced by what it
+ * meant to write rather than by what it wrote — and the regression survived all three.
+ *
+ * The remaining suspect, for whoever picks this up: **the beat is the wrong unit in
+ * compound meters.** `beatValue` makes an eighth the beat in 6/8, so thirds-of-a-beat
+ * looks for 32nd-note triplets, when what 6/8 actually subdivides is the dotted quarter.
+ * The score that regressed worst is largely in 6/8 with a triplet feel, which fits. A next
+ * attempt should group compound meters into dotted beats before deciding anything, and
+ * should watch the corpus from the first commit rather than the unit tests — clean
+ * three-note-per-beat input is the case that works, and it is not the case that matters.
  */
 import { createBar, createNote, duration, nextId, pitchAt } from "./build.js";
 import { fingerSequence } from "./fingering.js";
@@ -170,12 +193,6 @@ const NOTATABLE: Array<{ ticks: number; denominator: number; dots: 0 | 1 | 2 }> 
   }
   return out.sort((a, b) => b.ticks - a.ticks);
 })();
-
-/** Ticks of one notatable piece. */
-function pieceTicks(piece: { duration: Duration; dots: 0 | 1 | 2 }): number {
-  const base = (WHOLE_TICKS * piece.duration.numerator) / piece.duration.denominator;
-  return piece.dots === 0 ? base : piece.dots === 1 ? base * 1.5 : base * 1.75;
-}
 
 /** Percentile of a copy, so the caller's array keeps its order. */
 function percentile(values: readonly number[], p: number): number {
@@ -920,4 +937,3 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
   return { score: { id: nextId("s"), title: options.title ?? "Transcription", artist: "", tracks: [track], revision: 0 }, report };
 }
 
-export { pieceTicks };

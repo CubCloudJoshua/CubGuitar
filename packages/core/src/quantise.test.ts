@@ -15,6 +15,7 @@
 import { describe, expect, it } from "vitest";
 import {
   applyBatch,
+  beatTicks,
   createBar,
   createScore,
   createTrack,
@@ -54,14 +55,27 @@ function detect(score: Score): DetectedNote[] {
     .sort((a, b) => a.startSeconds - b.startSeconds || a.pitch - b.pitch);
 }
 
-/** The rhythm as written: one entry per beat, in ticks, rests marked. */
+/**
+ * The rhythm as written: one entry per beat, in ticks, rests marked.
+ *
+ * Measured with the production `beatTicks`, not with arithmetic of its own. Both helpers
+ * here used to reimplement it, which was harmless only for as long as no beat carried a
+ * tuplet: the copies did not scale by the ratio, so the first time a bar of triplets came
+ * through, the *helper* reported it as summing to more than a bar and the failure looked
+ * like a bug in the code under test. Anything measuring a beat should measure it the way
+ * the timeline, the MIDI writer and the engraver do.
+ */
 function rhythm(score: Score): string[] {
   const out: string[] = [];
   for (const bar of score.tracks[0]!.bars) {
     for (const beat of bar.voices[0]!.beats) {
-      const base = (QUARTER_TICKS * 4 * beat.duration.numerator) / beat.duration.denominator;
-      const ticks = beat.dots === 0 ? base : beat.dots === 1 ? base * 1.5 : base * 1.75;
-      out.push(beat.notes.length === 0 ? `rest:${ticks}` : `${ticks}:${beat.notes.map((n) => n.pitch).sort((a, b) => a - b).join(".")}`);
+      const ticks = beatTicks(beat);
+      const tuplet = beat.tuplet ? `t${beat.tuplet.actual}:${beat.tuplet.normal}` : "";
+      out.push(
+        beat.notes.length === 0
+          ? `rest:${ticks}${tuplet}`
+          : `${ticks}${tuplet}:${beat.notes.map((n) => n.pitch).sort((a, b) => a - b).join(".")}`,
+      );
     }
   }
   return out;
@@ -70,10 +84,7 @@ function rhythm(score: Score): string[] {
 /** Every bar's beats must sum to the meter, or every consumer downstream is wrong. */
 function barSums(score: Score): number[] {
   return score.tracks[0]!.bars.map((bar) =>
-    bar.voices[0]!.beats.reduce((total, beat) => {
-      const base = (QUARTER_TICKS * 4 * beat.duration.numerator) / beat.duration.denominator;
-      return total + (beat.dots === 0 ? base : beat.dots === 1 ? base * 1.5 : base * 1.75);
-    }, 0),
+    bar.voices[0]!.beats.reduce((total, beat) => total + beatTicks(beat), 0),
   );
 }
 
