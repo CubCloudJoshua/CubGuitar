@@ -78,8 +78,16 @@ The pipeline is four stages and we already own the last two:
 | --- | --- | --- |
 | Separate the guitar from the mix | Source separation (Demucs-class) | Off the shelf, GPU-bound |
 | Pitches and onsets from audio | Multi-pitch estimation (basic-pitch / MT3-class) | Off the shelf, GPU-bound |
-| Pitches to a rhythm | Quantisation against a tempo — `timeline()` in reverse | **Ours** |
+| Pitches to a rhythm | Quantisation against a tempo — `timeline()` in reverse | **Ours, built** (`core/quantise.ts`) |
 | Pitches to a fretboard | `fingerSequence` | **Ours, built** |
+
+**Both stages that are ours are built and graded.** `pnpm transcribe` plays every
+corpus score, adds detector-shaped timing error, pushes it back through the quantiser
+and the fingering solver, and grades the result against the score it came from: 100%
+of notes recovered at 0ms and 15ms of jitter, 99% at 40ms, and every written fingering
+sounding the note it claims (gated at 100%). What remains for this row of the table is
+the two GPU stages, and their error will compound with these numbers rather than
+replace them.
 
 **Why nobody offers it well.** The first two stages cost real GPU time per song. On
 rented cloud that is a per-transcription cost a subscription has to cover, which is
@@ -97,6 +105,15 @@ and the cleanup happens in an editor we already have. Anything claimed beyond th
 should be measured before it is said, and there is a natural gate for it: transcribe
 a recording of a score we already have and compare against the original. That is the
 same oracle discipline as `pnpm midi`.
+
+**That gate exists now** — `pnpm transcribe`, built before the models rather than
+after, which is the part worth repeating elsewhere. Because `timeline()` generates the
+notes a perfect detector would report, every corpus score is a labelled example with
+exact labels at no annotation cost, and the stages that are ours can be developed and
+graded with no GPU in the loop at all. The numbers above are therefore an honest
+ceiling on our half rather than a projection: what the models cost gets measured
+separately and added, and the sentence "polyphonic guitar transcription is not solved"
+stays true regardless of how good this table looks.
 
 **Sequencing note.** Do §1 first. This one is a research-shaped project; that one is
 a week.

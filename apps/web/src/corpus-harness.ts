@@ -12,9 +12,12 @@ import {
   createNote,
   createScore,
   duration,
+  mergeTies,
   nextId,
   pitchAt,
+  quantise,
   toAlphaTex,
+  type DetectedNote,
   type Op,
   type OpKind,
   type Score,
@@ -126,12 +129,65 @@ declare global {
       renderAudioBytes(bytes: number[], maxMs: number): Promise<AudioResult>;
       timingTex(tex: string): Promise<TimingResult>;
       timingBytes(bytes: number[]): Promise<TimingResult>;
+      transcribeTex(tex: string, jitterMs: number): Promise<TranscribeResult>;
+      transcribeBytes(bytes: number[], jitterMs: number): Promise<TranscribeResult>;
       midiTex(tex: string): Promise<MidiCompareResult>;
       midiBytes(bytes: number[]): Promise<MidiCompareResult>;
       musicXmlTex(tex: string): Promise<MusicXmlCompareResult>;
       musicXmlBytes(bytes: number[]): Promise<MusicXmlCompareResult>;
     };
   }
+}
+
+/**
+ * A score played, heard back, and graded against itself.
+ *
+ * The transcription gate. See `transcribe()` below for what is under test and what is
+ * deliberately not: exact pitches with detector-shaped timing error, which isolates
+ * the two pipeline stages that are ours from the two we would rent from a GPU.
+ */
+export interface TranscribeResult {
+  ok: boolean;
+  error?: string;
+  /** The timing error added to each onset before quantising, in milliseconds. */
+  jitterMs?: number;
+  /** Sounding notes in the original's first track, ties merged. */
+  truth?: number;
+  /** Sounding notes in the recovered score. */
+  placed?: number;
+  matched?: number;
+  pitchRecall?: number;
+  pitchPrecision?: number;
+  /**
+   * Of the matched notes, the fraction on the same string and fret as the original.
+   * A measurement of taste, not correctness — see the note at the match loop.
+   */
+  fingeringAgreement?: number;
+  /**
+   * Fraction of fingered notes whose string and fret actually sound their own pitch.
+   * One right answer, so this is the one that is gated.
+   */
+  fingeringValid?: number;
+  /** The subdivision chosen, and what it still could not separate. */
+  grid?: number;
+  mergedByGrid?: number;
+  meterChanges?: number;
+  /** Mean distance between a matched note and where it should have been. */
+  onsetErrorMs?: number;
+  /** The quantiser's own confidence signals, so a bad row says which stage gave way. */
+  gridFit?: number;
+  onsetShiftMs?: number;
+  tripletsWanted?: number;
+  bpmTruth?: number;
+  /** More than one means the single-tempo quantiser is being asked the impossible. */
+  tempoChanges?: number;
+  barsTruth?: number;
+  barsRecovered?: number;
+  /**
+   * Silence before the original's first note, which the transcription does not keep.
+   * Both sides are aligned by this before matching — see the note at the match loop.
+   */
+  leadInMs?: number;
 }
 
 /**
@@ -688,6 +744,161 @@ function pitchDiff(a: number[], b: number[]): string[] {
     .map(([pitch, n]) => `${pitch}x${n}`);
 }
 
+/**
+ * The transcription gate: a score, played, heard back, and graded against itself.
+ *
+ * DIFFERENTIATION.md §2 scopes audio-to-tab as research and says accuracy should be
+ * measured before it is claimed. This is where it gets measured, and the reason it
+ * can be measured at all is that we own both ends of the pipeline: `timeline()` turns
+ * a score into the notes a perfect detector would report, so every file in the corpus
+ * is a labelled example for free. No annotation, no purchased dataset, and the labels
+ * are exact rather than someone's best transcription.
+ *
+ * What this does *not* test is stages 1 and 2 — separation and pitch detection. Those
+ * are model downloads and GPU time. Feeding the quantiser exact pitches with
+ * detector-shaped timing error isolates the stage that is ours, which is the stage
+ * that decides whether the output is a *tab* or a pile of MIDI. `jitterMs` is the
+ * knob: sweep it and the report says where our half gives way, separately from
+ * whatever the models do.
+ */
+async function transcribe(trigger: () => void, jitterMs: number): Promise<TranscribeResult> {
+  const loaded = await run(trigger);
+  if (!loaded.ok) return { ok: false, error: loaded.error ?? "score failed to load" };
+  const source = api.score;
+  if (!source) return { ok: false, error: "no score after load" };
+
+  const core = fromAlphaTab(source).score;
+  const line = timeline(core);
+  const track = core.tracks[0];
+  if (!track) return { ok: false, error: "no first track" };
+
+  // One instrument, which is what a transcription is. Grading a mixed timeline
+  // against a single-track result would charge the quantiser for notes nobody asked
+  // it to write. Ties merged, because a tie sounds as one note and a detector hears
+  // one note — the written pair is our notation, not the performance.
+  const truth = mergeTies(line.notes.filter((n) => n.trackIndex === 0)).sort(
+    (a, b) => a.startSeconds - b.startSeconds || a.pitch - b.pitch,
+  );
+  if (truth.length === 0) return { ok: false, error: "first track has no pitched notes" };
+
+  // Deterministic pseudo-random jitter. A seeded generator rather than Math.random
+  // so a regression in the gate is a regression in the code, not in the dice.
+  let seed = 0x2f6e2b1;
+  const nextUnit = () => {
+    seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+    return seed / 0x7fffffff;
+  };
+  const jitterSeconds = jitterMs / 1000;
+  const detected: DetectedNote[] = truth.map((n) => ({
+    pitch: n.pitch,
+    startSeconds: Math.max(0, n.startSeconds + (nextUnit() * 2 - 1) * jitterSeconds),
+    // Length is the least reliable thing a detector reports — a decaying string has
+    // no defined end — so it is jittered harder than the onset.
+    durationSeconds: Math.max(0.02, n.durationSeconds * (1 + (nextUnit() * 2 - 1) * 0.3)),
+  }));
+
+  const bpmTruth = line.tempoChanges[0]?.bpm ?? 120;
+  const meter = line.meterChanges[0];
+  const { score: recovered, report } = quantise(detected, {
+    bpm: bpmTruth,
+    ...(meter ? { meter: { beats: meter.beats, beatValue: meter.beatValue } } : {}),
+    instrument: track.instrument,
+  });
+
+  const got = mergeTies(timeline(recovered).notes).sort(
+    (a, b) => a.startSeconds - b.startSeconds || a.pitch - b.pitch,
+  );
+
+  // Both sides are measured from their own first onset before being compared.
+  //
+  // The quantiser starts a transcription at its first note on purpose: leading silence
+  // is not music, and a detector cannot tell a rest before the entry from noise before
+  // the count-in. So on a track whose guitar enters a bar late, every recovered note
+  // sits exactly that far earlier than the original — a constant offset, not drift.
+  // Comparing raw positions scored one such file at 21% recall while its rhythm was
+  // recovered perfectly, which is the metric being wrong rather than the code.
+  const truthOrigin = truth[0]?.startSeconds ?? 0;
+  const gotOrigin = got[0]?.startSeconds ?? 0;
+
+  // Matched greedily on pitch within a tolerance of the true onset. Half a beat is
+  // generous on purpose: this measures whether the note is *in the right place in the
+  // bar*, and a stricter window would be measuring the grid resolution instead.
+  const tolerance = (60 / bpmTruth) * 0.5;
+  const taken = new Set<number>();
+  let matched = 0;
+  let fingeringSame = 0;
+  let onsetErrorTotal = 0;
+  for (const want of truth) {
+    let bestIndex = -1;
+    let bestDelta = Number.POSITIVE_INFINITY;
+    for (const [i, have] of got.entries()) {
+      if (taken.has(i) || have.pitch !== want.pitch) continue;
+      const delta = Math.abs(
+        have.startSeconds - gotOrigin - (want.startSeconds - truthOrigin),
+      );
+      if (delta < bestDelta) {
+        bestDelta = delta;
+        bestIndex = i;
+      }
+    }
+    if (bestIndex < 0 || bestDelta > tolerance) continue;
+    taken.add(bestIndex);
+    matched += 1;
+    onsetErrorTotal += bestDelta;
+    const have = got[bestIndex]!;
+    // The stage everyone else skips. A transcription that recovers the pitch but not
+    // the position on the neck is MIDI, and the user still has to finger it.
+    //
+    // Reported, not gated. Our solver picks its own positions, and where it disagrees
+    // with the original both are usually playable — A2 is string 5 open or string 6
+    // fret 5, and a guitarist would accept either. Gating on agreement would be
+    // gating on whether we guessed a human's preference, which is not correctness.
+    if (have.string === want.string && have.fret === want.fret) fingeringSame += 1;
+  }
+
+  // Correctness, as opposed to style: does every fingering we wrote actually sound the
+  // note we wrote it for, on this instrument's tuning and capo? Unlike agreement this
+  // has exactly one right answer, so it *is* gated — a fret that produces a different
+  // pitch than its note claims is a bug that would put a wrong tab in front of a user.
+  const fretted = track.instrument.kind === "fretted";
+  let fingered = 0;
+  let fingeringWrong = 0;
+  for (const note of got) {
+    if (note.string === undefined || note.fret === undefined) continue;
+    fingered += 1;
+    if (fretted && pitchAt(track.instrument, note.string, note.fret) !== note.pitch) {
+      fingeringWrong += 1;
+    }
+  }
+
+  return {
+    ok: true,
+    jitterMs,
+    truth: truth.length,
+    placed: got.length,
+    matched,
+    pitchRecall: matched / truth.length,
+    pitchPrecision: got.length === 0 ? 0 : matched / got.length,
+    fingeringAgreement: matched === 0 ? 0 : fingeringSame / matched,
+    fingeringValid: fingered === 0 ? 1 : (fingered - fingeringWrong) / fingered,
+    onsetErrorMs: matched === 0 ? 0 : Math.round((onsetErrorTotal / matched) * 1000),
+    gridFit: report.gridFit,
+    onsetShiftMs: Math.round(report.onsetShift.p95 * 1000),
+    tripletsWanted: report.tripletsWanted,
+    grid: report.grid,
+    mergedByGrid: report.mergedByGrid,
+    bpmTruth,
+    tempoChanges: line.tempoChanges.length,
+    meterChanges: line.meterChanges.length,
+    // Played, not written: `timeline()` expands repeats, so the truth this is graded
+    // against is longer than the score on the page. Comparing the recovered bar count
+    // against the *written* one made every score with a repeat look 20% too long.
+    barsTruth: line.bars.length,
+    barsRecovered: report.barsWritten,
+    leadInMs: Math.round((truthOrigin - gotOrigin) * 1000),
+  };
+}
+
 async function compareMidi(trigger: () => void): Promise<MidiCompareResult> {
   const loaded = await run(trigger);
   if (!loaded.ok) return { ok: false, error: loaded.error ?? "score failed to load" };
@@ -737,6 +948,8 @@ window.cubscore = {
   midiTex: (tex) => compareMidi(() => api.tex(tex)),
   midiBytes: (bytes) => compareMidi(() => api.load(new Uint8Array(bytes))),
   timingTex: (tex) => timing(() => api.tex(tex)),
+  transcribeTex: (tex, jitterMs) => transcribe(() => api.tex(tex), jitterMs),
+  transcribeBytes: (bytes, jitterMs) => transcribe(() => api.load(new Uint8Array(bytes)), jitterMs),
   timingBytes: (bytes) => timing(() => api.load(new Uint8Array(bytes))),
   renderAudioTex: (tex, maxMs) => renderAudio(() => api.tex(tex), maxMs),
   renderAudioBytes: (bytes, maxMs) => renderAudio(() => api.load(new Uint8Array(bytes)), maxMs),

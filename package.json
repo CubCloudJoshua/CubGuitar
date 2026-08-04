@@ -16,6 +16,7 @@
     "timing": "node tools/timing-check.mjs",
     "midi": "node tools/midi-check.mjs",
     "musicxml": "node tools/musicxml-check.mjs",
+    "transcribe": "node tools/transcribe-check.mjs",
     "editperf": "node tools/edit-perf.mjs"
   },
   "engines": {

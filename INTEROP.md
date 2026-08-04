@@ -299,9 +299,14 @@ Value per unit of risk, same as STANDALONE.md.
 5. **Percussion in the model.** Weeks. Unblocks four separate things and closes the
    gap our own import reports name most often. Now the largest remaining hole: MusicXML
    writes a drum part as pitched notes and reports it, which is honest and not right.
-6. **MIDI file import**. Weeks. The fingering half is done; what remains is
-   quantisation and track splitting, and it is the first place a model earns its
-   keep on musical judgement rather than plumbing.
+6. **MIDI file import**. The fingering half was already done, and ~~quantisation~~ is
+   now done too: `packages/core/src/quantise.ts` takes pitches with onsets in seconds
+   and returns a `Score`, built for the transcription pipeline and graded by `pnpm
+   transcribe`. It is the same input a MIDI file gives us, which is why it lives in
+   core rather than in the transcription plumbing. What remains for MIDI import
+   specifically is **track splitting** — deciding which channel is which instrument —
+   plus honouring a file's tempo and meter *maps* rather than its first of each, which
+   the quantiser does not do yet and reports when it matters.
 7. **Web MIDI**: pedals, then note entry, then clock sync. Days each, and the
    hexaphonic-pickup path is a genuinely differentiated demo.
 8. **Guitar Pro import**, ours rather than alphaTab's. Weeks, deliberately last:
