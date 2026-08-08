@@ -13,7 +13,12 @@
 import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { hashPassword, newSessionToken, normalizeEmail, validPassword, verifyPassword } from "./auth.js";
+import { hashPassword, newSessionToken, normalizeEmail, validPassword, verifyPassword,
+  newRecoveryCode,
+  normalizeRecoveryCode,
+  hashRecoveryCode,
+  verifyRecoveryCode,
+} from "./auth.js";
 import {
   FileLibraryStore,
   FileSessionStore,
@@ -159,10 +164,12 @@ app.post("/api/auth/register", async (request, reply) => {
   if (!validPassword(body.password)) {
     return reply.status(400).send({ error: "password must be at least 8 characters" });
   }
+  const recoveryCode = newRecoveryCode();
   const user: User = {
     id: newShareId(),
     email,
     passwordHash: hashPassword(body.password),
+    recoveryHash: hashRecoveryCode(normalizeRecoveryCode(recoveryCode)!),
     createdAt: Date.now(),
   };
   // Record first, then claim the address. Claiming decides who wins a race, so
@@ -176,7 +183,51 @@ app.post("/api/auth/register", async (request, reply) => {
   const token = newSessionToken();
   await sessions.create(token, user.id);
   setSessionCookie(reply, token);
-  return { user: publicUser(user) };
+  // The code goes over the wire exactly once, here, and is never readable again:
+  // the server keeps only its hash. The client's job is to make the user save it.
+  return { user: publicUser(user), recoveryCode };
+});
+
+/**
+ * Password reset by recovery code — the email-less kind, on purpose.
+ *
+ * Accounts here run on CubScore's own infrastructure with no external mail provider in
+ * the loop, so recovery cannot lean on "we emailed you a link". The recovery code is
+ * the replacement: minted at signup, shown once, stored hashed. Using it sets the new
+ * password, rotates the code (a code that worked is spent), and ends every session the
+ * account has — the code gets used precisely when the password may be in someone
+ * else's hands, and a reset that leaves their session alive has reset nothing.
+ */
+app.post("/api/auth/recover", async (request, reply) => {
+  if (tooMany("auth", request.ip)) return reply.status(429).send({ error: "rate limit exceeded" });
+  const body = (request.body ?? {}) as { email?: unknown; recoveryCode?: unknown; newPassword?: unknown };
+  const email = normalizeEmail(body.email);
+  // Per-account limiting, same as login: a recovery code is guessable in principle
+  // and must not be guessable in practice.
+  if (email && tooMany("auth", `to ${email}`)) {
+    return reply.status(429).send({ error: "rate limit exceeded" });
+  }
+  if (!validPassword(body.newPassword)) {
+    return reply.status(400).send({ error: "password must be at least 8 characters" });
+  }
+  const code = normalizeRecoveryCode(body.recoveryCode);
+  const user = email ? await users.byEmail(email) : undefined;
+  // One failure message for unknown email, missing hash, and wrong code, so the
+  // endpoint confirms nothing about which addresses have accounts.
+  if (!user || !code || !user.recoveryHash || !verifyRecoveryCode(code, user.recoveryHash)) {
+    return reply.status(401).send({ error: "invalid email or recovery code" });
+  }
+  const nextCode = newRecoveryCode();
+  await users.put({
+    ...user,
+    passwordHash: hashPassword(body.newPassword as string),
+    recoveryHash: hashRecoveryCode(normalizeRecoveryCode(nextCode)!),
+  });
+  await sessions.destroyAllFor(user.id);
+  const token = newSessionToken();
+  await sessions.create(token, user.id);
+  setSessionCookie(reply, token);
+  return { user: publicUser(user), recoveryCode: nextCode };
 });
 
 app.post("/api/auth/login", async (request, reply) => {

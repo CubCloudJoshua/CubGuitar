@@ -156,4 +156,48 @@ export async function run({ browser, baseUrl, recorder }) {
     reopened.includes("Am7") && reopened.includes("moonlight"),
     reopened.slice(0, 200),
   );
+
+  // The chart's chords as diagrams, computed by the voicing engine rather than looked
+  // up, which is what makes them right off standard tuning. Asserted per symbol via the
+  // data hook, and with dots: an empty grid per chord would pass a count check.
+  const diagrams = await page.evaluate(() =>
+    Array.from(document.querySelectorAll("[data-chord-diagram]")).map((el) => ({
+      name: el.getAttribute("data-chord-diagram"),
+      dots: el.querySelectorAll("circle").length,
+    })),
+  );
+  recorder.check(
+    "each chart chord has a diagram",
+    diagrams.some((d) => d.name === "Am7") && diagrams.length >= 2,
+    JSON.stringify(diagrams),
+  );
+  recorder.check(
+    "and the diagrams have fingerings in them",
+    diagrams.filter((d) => d.name !== "Qzz").every((d) => d.dots > 0),
+    JSON.stringify(diagrams),
+  );
+  recorder.check(
+    "a symbol the grammar cannot read is listed without an invented shape",
+    diagrams.some((d) => d.name === "Qzz" && d.dots === 0),
+    JSON.stringify(diagrams),
+  );
+
+  // Transposition, from the palette: one command, the whole document. Am7 up two
+  // semitones is Bm7 in both the engraving and the diagram strip.
+  await openPalette(page);
+  await page.keyboard.type("transpose up a tone", { delay: 20 });
+  await settle(400);
+  await page.keyboard.press("Enter");
+  await settle(1800);
+  const moved = await scoreText(page);
+  recorder.check("transpose moves the chart in the engraving", moved.includes("Bm7"), moved.slice(0, 200));
+  recorder.check("and the old key is gone", !moved.includes("Am7"));
+  recorder.check(
+    "the diagram strip followed the key",
+    (await page.locator('[data-chord-diagram="Bm7"]').count()) === 1,
+  );
+  // One undo takes the whole key change back, because it went through as one batch.
+  await page.keyboard.press("Control+z");
+  await settle(1600);
+  recorder.check("one undo restores the key", (await scoreText(page)).includes("Am7"));
 }

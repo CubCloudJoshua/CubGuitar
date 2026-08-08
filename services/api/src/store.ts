@@ -43,6 +43,12 @@ export interface User {
   id: string;
   email: string;
   passwordHash: string;
+  /**
+   * Hash of the account's recovery code — the email-less password reset. Optional
+   * because accounts predating the feature have none until their next sign-in mints
+   * one. A password equivalent, so it is stored exactly the way the password is.
+   */
+  recoveryHash?: string;
   createdAt: number;
 }
 
@@ -63,6 +69,12 @@ export interface SessionStore {
   create(token: string, userId: string): Promise<void>;
   userIdFor(token: string): Promise<string | undefined>;
   destroy(token: string): Promise<void>;
+  /**
+   * Ends every session the user has, everywhere. Recovery calls this: the code is
+   * used when the password may be in someone else's hands, and a reset that leaves
+   * the attacker's session alive has reset nothing.
+   */
+  destroyAllFor(userId: string): Promise<void>;
 }
 
 /** A user's cloud library entry. Bytes travel as base64 in the JSON body. */
@@ -346,6 +358,13 @@ export class FileSessionStore implements SessionStore {
 
   destroy(token: string): Promise<void> {
     return this.docs.delete(token);
+  }
+
+  async destroyAllFor(userId: string): Promise<void> {
+    // A scan, and fine as one: sessions number in the dozens at this scale, and
+    // recovery is rare. An index would be optimising the incident path.
+    const all = await this.docs.all();
+    await Promise.all(all.filter((s) => s.userId === userId).map((s) => this.docs.delete(s.id)));
   }
 }
 

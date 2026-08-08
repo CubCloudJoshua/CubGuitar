@@ -292,6 +292,28 @@ export function useAlphaTab() {
     setLoopRange(null);
   }, []);
 
+  /**
+   * Loops a tick range and moves the playhead to its start.
+   *
+   * The programmatic sibling of drag-to-select: the practice plan uses it to turn
+   * "work on bar 7" into a loop without asking the user to find bar 7 by hand. Looping
+   * is switched on with it, because a range that plays once is a seek with extra steps.
+   *
+   * `loopRange` state is deliberately NOT set here. It updates from alphaTab's own
+   * playbackRangeChanged event, same as a drag selection, so the indicator reflects
+   * what the player will actually do rather than what this function meant to do — a
+   * version that set the state itself showed a loop that did not exist when the
+   * assignment was dropped, and the e2e mutation run is how that was caught.
+   */
+  const setLoopBars = useCallback((startTick: number, endTick: number) => {
+    const api = apiRef.current;
+    if (!api) return;
+    api.playbackRange = { startTick, endTick } as never;
+    api.isLooping = true;
+    api.tickPosition = startTick;
+    setLoop(true);
+  }, []);
+
   const toggleMetronome = useCallback(() => {
     setMetronomeState((prev) => {
       const next = !prev;
@@ -459,6 +481,7 @@ export function useAlphaTab() {
     setSpeed,
     toggleLoop,
     clearLoopRange,
+    setLoopBars,
     toggleMetronome,
     toggleCountIn,
     setZoom,

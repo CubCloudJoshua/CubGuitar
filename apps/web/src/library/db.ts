@@ -8,7 +8,7 @@
  */
 
 const DB_NAME = "cubscore";
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 const STORE = "scores";
 /**
  * Graded takes, one row per play-through.
@@ -30,6 +30,8 @@ const TAKES = "takes";
  * the app cannot find. One row holds both or neither.
  */
 const RECORDINGS = "recordings";
+/** Earlier states of each score, so a bad edit is recoverable. See StoredVersion. */
+const VERSIONS = "versions";
 
 export type ScoreFormat = "gp" | "altex";
 
@@ -79,6 +81,10 @@ function open(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains(RECORDINGS)) {
         db.createObjectStore(RECORDINGS, { keyPath: "scoreId" });
+      }
+      if (!db.objectStoreNames.contains(VERSIONS)) {
+        const versions = db.createObjectStore(VERSIONS, { keyPath: "id" });
+        versions.createIndex("scoreId", "scoreId");
       }
       if (!db.objectStoreNames.contains(TAKES)) {
         const takes = db.createObjectStore(TAKES, { keyPath: "id" });
@@ -305,4 +311,59 @@ export async function putRecording(recording: StoredRecording): Promise<void> {
 /** Forgets a score's recording, marks and all. Detaching is the only way here. */
 export async function deleteRecording(scoreId: string): Promise<void> {
   await tx<undefined>("readwrite", (s) => s.delete(scoreId) as IDBRequest<undefined>, RECORDINGS);
+}
+
+/**
+ * One earlier state of a score's document, kept so an edit is never the end of it.
+ *
+ * A snapshot of the editable document (the core model as JSON), not of the whole row:
+ * the imported source bytes never change and are already kept on the entry itself.
+ */
+export interface StoredVersion {
+  id: string;
+  scoreId: string;
+  ownerId?: string | null;
+  at: number;
+  /** JSON of the core Score at this moment. */
+  core: string;
+  /** The alphaTex projection, so a version can be previewed without the editor. */
+  tex: string;
+  bars: number;
+  notes: number;
+}
+
+/**
+ * How many versions each score keeps. Oldest beyond this are dropped at write time.
+ *
+ * Twenty spans a working session's checkpoints without turning the database into an
+ * archive: versions are written at most once a minute (see useLibrary), so this is at
+ * least twenty minutes of history and usually a lot more.
+ */
+export const MAX_VERSIONS = 20;
+
+export async function listVersions(scoreId: string): Promise<StoredVersion[]> {
+  await ownerKnown;
+  const rows = await tx<StoredVersion[]>(
+    "readonly",
+    (s) => s.index("scoreId").getAll(scoreId) as IDBRequest<StoredVersion[]>,
+    VERSIONS,
+  );
+  return rows.filter((r) => (r.ownerId ?? null) === owner).sort((a, b) => b.at - a.at);
+}
+
+/** Keeps a version and enforces the cap, oldest out first. */
+export async function putVersion(version: StoredVersion): Promise<void> {
+  await tx<IDBValidKey>("readwrite", (s) => s.put(version), VERSIONS);
+  const all = await listVersions(version.scoreId);
+  for (const stale of all.slice(MAX_VERSIONS)) {
+    await tx<undefined>("readwrite", (s) => s.delete(stale.id) as IDBRequest<undefined>, VERSIONS);
+  }
+}
+
+/** Forgets a score's history. Deleting the score is the only caller. */
+export async function clearVersions(scoreId: string): Promise<void> {
+  const rows = await listVersions(scoreId);
+  await Promise.all(
+    rows.map((row) => tx<undefined>("readwrite", (s) => s.delete(row.id) as IDBRequest<undefined>, VERSIONS)),
+  );
 }

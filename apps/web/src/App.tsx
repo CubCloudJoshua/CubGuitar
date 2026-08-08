@@ -30,6 +30,7 @@ import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
 import { BarMarkings } from "./editor/BarMarkings";
 import { SongwritingOverlay } from "./editor/Songwriting";
+import { ChordDiagrams } from "./editor/ChordDiagrams";
 import { PerformBar, Setlist, TapZone, turnPage, usePerformShell } from "./perform/PerformMode";
 import { TransportPill } from "./components/TransportPill";
 import { ExportMenu } from "./components/ExportMenu";
@@ -392,6 +393,23 @@ export function App() {
     },
     listening,
     recording: { open: recordingOpen, toggle: () => setRecordingOpen((v) => !v) },
+    onTranspose: (semitones) => {
+      const report = editor.transpose(semitones);
+      // A refusal has reasons and a success can have notes (a chart symbol kept as
+      // written); both belong in the banner every other report uses. A clean move
+      // stays quiet — the score visibly changed, which is its own confirmation.
+      if (report.notes.length > 0 || report.chordsKept.length > 0) {
+        lib.setImportNotice({
+          unsupported: [
+            ...report.notes,
+            ...report.chordsKept.map((c) => `chord "${c}" was kept as written (not a symbol the grammar reads)`),
+          ],
+          trackCount: 0,
+          barCount: 0,
+          noteCount: report.notesMoved,
+        });
+      }
+    },
     onCompose: (pattern) => {
       const report = editor.composeTrack(pattern);
       // The same banner an import or an arrangement uses: what was written, what
@@ -711,6 +729,7 @@ export function App() {
       {editing && !performing && (
         <EditorBar e={editor} enabled={editing && !performing} />
       )}
+      {editing && !performing && <ChordDiagrams e={editor} />}
       {/* Also shown in the player, for an import that converted to nothing
           editable: that user never presses EDIT, so gating this on the editor
           meant they were never told why their file is play-only. */}
@@ -727,6 +746,24 @@ export function App() {
           summary={practice.summary}
           barCount={editor.score.tracks[editor.cursor.track]?.bars.length ?? 0}
           onClear={practice.clear}
+          onDrill={(bar, bpm) => {
+            // The plan's bar looped at the plan's tempo: measurement becomes action in
+            // one click. Ticks come from the same timeline the grading used, so the
+            // loop wraps exactly the bar the record is about; a repeated bar loops its
+            // first pass, which is where practice starts anyway.
+            const played = buildTimeline(editor.score).bars.find((x) => x.bar === bar);
+            if (!played) return;
+            c.setLoopBars(played.startTicks, played.endTicks);
+            if (bpm !== null) {
+              const written =
+                editor.score.tracks[editor.cursor.track]?.bars
+                  .slice(0, bar + 1)
+                  .reduce<number>((last, b) => b.tempoBpm ?? last, 120) ?? 120;
+              // Between quarter and full speed: the record can recommend slower than
+              // the writing, never faster — this is practice, not a victory lap.
+              c.setSpeed(Math.min(1, Math.max(0.25, Math.round((bpm / written) * 20) / 20)));
+            }
+          }}
         />
       )}
       {/* Outside the bar, so hiding the controls does not stop the music. */}
@@ -901,6 +938,8 @@ export function App() {
             onOpen={(e) => switchDocument(() => void lib.openEntry(e))}
             onDelete={(id) => void lib.removeEntry(id)}
             onImportClick={() => fileInputRef.current?.click()}
+            onListVersions={lib.versionsFor}
+            onRestoreVersion={(v) => switchDocument(() => void lib.restoreVersion(v))}
           />
         </Drawer>
       )}

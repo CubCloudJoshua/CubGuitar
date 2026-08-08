@@ -65,7 +65,7 @@
  * three-note-per-beat input is the case that works, and it is not the case that matters.
  */
 import { createBar, createNote, duration, nextId, pitchAt } from "./build.js";
-import { fingerSequence } from "./fingering.js";
+import { alignToPitches, fingerSequence } from "./fingering.js";
 import { DEFAULT_TEMPO_BPM, QUARTER_TICKS } from "./timeline.js";
 import type { Bar, Beat, Duration, Instrument, Note, Score, TimeSignature, Track } from "./score.js";
 
@@ -542,43 +542,6 @@ function groupChords(
   return groups;
 }
 
-/**
- * Fingerings lined back up with the pitches they belong to.
- *
- * `fingerSequence` returns a *compacted* answer: a pitch it could not place leaves no
- * entry at all, so `positions[i]` stops corresponding to `pitches[i]` from the first
- * unplaceable note onward. Indexing it positionally therefore hands each remaining
- * note the fingering meant for a different pitch, and a fret that sounds a note other
- * than the one written is the worst output this module can produce — a tab that is
- * confidently wrong.
- *
- * `pnpm transcribe` found this by measuring, not by reading: forcing a coarse grid
- * merged notes into chords too wide to place, and the share of written frets that
- * actually sound their own pitch fell off 100%.
- *
- * The mapping is rebuilt by asking each position what it sounds, which is the one
- * reading that cannot drift out of alignment. A queue per pitch rather than a plain
- * map, so a chord holding the same pitch twice — a unison across two strings — gets
- * two positions instead of one used twice.
- */
-function alignFingering(
-  pitches: readonly number[],
-  positions: ReadonlyArray<{ string: number; fret: number }> | null,
-  instrument: Instrument | undefined,
-): Array<{ string: number; fret: number } | undefined> {
-  if (!positions || positions.length === 0 || instrument === undefined || instrument.kind !== "fretted") {
-    return pitches.map(() => undefined);
-  }
-  const queues = new Map<number, Array<{ string: number; fret: number }>>();
-  for (const position of positions) {
-    const sounds = pitchAt(instrument, position.string, position.fret);
-    const queue = queues.get(sounds);
-    if (queue) queue.push(position);
-    else queues.set(sounds, [position]);
-  }
-  return pitches.map((pitch) => queues.get(pitch)?.shift());
-}
-
 /** One sounding event, snapped to the grid, with the silence that follows it. */
 interface Span {
   startTicks: number;
@@ -867,7 +830,7 @@ export function quantise(detected: readonly DetectedNote[], options: QuantiseOpt
       cursor,
       span.soundTicks,
       span.pitches,
-      alignFingering(span.pitches, fingering?.chords[i] ?? null, instrument),
+      alignToPitches(span.pitches, fingering?.chords[i] ?? null, instrument),
     );
     if (span.restTicks > 0) cursor = write(cursor, span.restTicks, null, null);
   }

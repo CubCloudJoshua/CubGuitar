@@ -32,7 +32,12 @@ export interface KeySignature {
   mode: "major" | "minor";
 }
 
-/** MIDI note number for each open string, low to high. */
+/**
+ * MIDI note number for each open string, indexed by string number: `tuning[0]` is
+ * string 1, the highest. STANDARD_GUITAR is [64, 59, 55, 50, 45, 40] — E4 first.
+ * (This comment said "low to high" for a long time while every constant and consumer
+ * did the opposite; a helper was nearly shipped against the comment.)
+ */
 export type Tuning = number[];
 
 export type Articulation =

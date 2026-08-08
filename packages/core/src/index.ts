@@ -16,3 +16,4 @@ export * from "./diff.js";
 export * from "./harmony.js";
 export * from "./compose.js";
 export * from "./quantise.js";
+export * from "./transpose.js";

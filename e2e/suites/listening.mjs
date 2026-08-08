@@ -230,6 +230,18 @@ export async function run({ baseUrl, recorder }) {
       (await page.locator("body").innerText()).match(/Work on bars?[^\n]*/)?.[0] ?? "nothing named",
     );
 
+    // Naming the bar and leaving the loop three manual steps away is measurement
+    // without action, so the named bar is a button: one click loops it. What is
+    // asserted is the outcome the player shows — a loop region exists and looping is
+    // on — via the transport's own state hooks.
+    await page.locator("[data-practice-drill-bar]").first().click();
+    await page.waitForTimeout(900);
+    recorder.check(
+      "clicking the named bar arms a loop over it",
+      (await page.locator('[data-loop-active="true"]').count()) >= 1,
+      (await page.locator("body").innerText()).match(/LOOP[^\n]*/)?.[0] ?? "no loop state found",
+    );
+
     // Leaving the editor has to release the device. A microphone that outlives the
     // surface accounting for it leaves the browser's recording indicator lit with
     // nothing on screen explaining why, which is alarming and ought to be.

@@ -28,6 +28,8 @@ interface CommandDeps {
   onArrange: (kind: "guitar" | "bass") => void;
   /** Generates the accompaniment track from the chord chart; see core/compose. */
   onCompose: (pattern: "sustain" | "strum" | "arpeggio") => void;
+  /** Moves the whole document by an interval, as one undo step; see core/transpose. */
+  onTranspose: (semitones: number) => void;
   /** The microphone, graded against the score; see listen/useListening. */
   listening: { on: boolean; toggle: () => void };
   /** A recording playing with the score; see sync/useRecording. */
@@ -146,6 +148,23 @@ export function useCommands(deps: CommandDeps): Command[] {
           run: () => deps.onArrange("bass"),
         });
       }
+      // Transposition: the singer's edit. Semitone and whole-tone both ways, which
+      // covers capo-less key nudges; anything larger is repeated presses, each its own
+      // undo step, which is also how you find the key you actually wanted.
+      for (const [semitones, label] of [
+        [1, "Transpose up a semitone"],
+        [-1, "Transpose down a semitone"],
+        [2, "Transpose up a tone"],
+        [-2, "Transpose down a tone"],
+      ] as const) {
+        add({
+          id: `transpose-${semitones > 0 ? "up" : "down"}-${Math.abs(semitones)}`,
+          title: label,
+          section: "Edit",
+          run: () => deps.onTranspose(semitones),
+        });
+      }
+
       // Songwriting. Compose is offered only once there is a chart to play, and each
       // pattern is its own command so the palette teaches what the three words mean.
       const hasChart = editor.score.tracks.some((t) =>

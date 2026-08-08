@@ -333,3 +333,45 @@ export function fingerOne(
   }
   return best;
 }
+
+/**
+ * Positions matched back to the pitches they sound, one entry per pitch.
+ *
+ * `fingerSequence` returns a *compacted* answer: a pitch it could not place leaves no
+ * entry at all, so from the first unplaceable note onward `positions[i]` stops
+ * corresponding to `pitches[i]`. Indexing positionally therefore hands each remaining
+ * note a fingering meant for a different pitch — a fret that sounds a note other than
+ * the one written, which is the most confidently wrong output a tab can contain. The
+ * transcription gate caught this by measurement in the quantiser, which carries on past
+ * unreachable pitches and so really does receive compacted answers. (Transposition
+ * consumes the same result but refuses on any unreachable pitch first, which makes the
+ * answer provably complete there — it indexes positionally and asserts the length.)
+ * The repair lives here beside the function whose shape requires it.
+ *
+ * Rebuilt by asking each position what it sounds, which cannot drift out of alignment.
+ * A queue per pitch rather than a map, so a unison across two strings gets two
+ * positions instead of one used twice.
+ */
+export function alignToPitches(
+  pitches: readonly number[],
+  positions: ReadonlyArray<FretPosition> | null,
+  instrument: Instrument | undefined,
+): Array<FretPosition | undefined> {
+  if (!positions || positions.length === 0 || instrument === undefined || instrument.kind !== "fretted") {
+    return pitches.map(() => undefined);
+  }
+  // The same arithmetic as `pitchAt` and `positionsFor`: string 1 is tuning[0]. Not a
+  // third implementation — a helper here nearly shipped with the tuning reversed, on the
+  // strength of a comment in score.ts that says "low to high" while every constant and
+  // every consumer stores it high to low.
+  const soundOf = (position: FretPosition) =>
+    (instrument.tuning[position.string - 1] ?? 0) + position.fret + instrument.capo;
+  const queues = new Map<number, FretPosition[]>();
+  for (const position of positions) {
+    const sounds = soundOf(position);
+    const queue = queues.get(sounds);
+    if (queue) queue.push(position);
+    else queues.set(sounds, [position]);
+  }
+  return pitches.map((pitch) => queues.get(pitch)?.shift());
+}

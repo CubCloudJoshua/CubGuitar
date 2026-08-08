@@ -8,6 +8,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { hashRecoveryCode, newRecoveryCode, normalizeRecoveryCode, verifyRecoveryCode } from "./auth.js";
 import {
   FileLibraryStore,
   FileSessionStore,
@@ -171,6 +172,52 @@ describe("FileSessionStore", () => {
     await sessions.create("token-b", "user-2");
     await sessions.destroy("token-b");
     expect(await sessions.userIdFor("token-b")).toBeUndefined();
+  });
+
+  it("ends every session one user has, and only theirs", async () => {
+    // The recovery path: the code is used when the password may be in someone else's
+    // hands, and a reset that leaves the attacker's session alive has reset nothing.
+    // The other user's session surviving is as much the point as the target's dying —
+    // recovery of one account must not sign everyone else out.
+    const sessions = new FileSessionStore(path.join(dir, "sessions"), 60_000);
+    await sessions.create("token-c1", "user-3");
+    await sessions.create("token-c2", "user-3");
+    await sessions.create("token-d", "user-4");
+    await sessions.destroyAllFor("user-3");
+    expect(await sessions.userIdFor("token-c1")).toBeUndefined();
+    expect(await sessions.userIdFor("token-c2")).toBeUndefined();
+    expect(await sessions.userIdFor("token-d")).toBe("user-4");
+  });
+});
+
+describe("recovery codes", () => {
+  it("mints codes in the shape a human can write down", () => {
+    for (let i = 0; i < 20; i += 1) {
+      const code = newRecoveryCode();
+      expect(code).toMatch(/^[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}-[2-9A-HJKMNP-Z]{4}$/);
+      // The ambiguous glyphs are not in the alphabet: a code on paper gets read back.
+      expect(code).not.toMatch(/[01OIL]/);
+    }
+  });
+
+  it("mints a different code every time", () => {
+    const seen = new Set(Array.from({ length: 50 }, () => newRecoveryCode()));
+    expect(seen.size).toBe(50);
+  });
+
+  it("verifies through the hash, forgiving case and punctuation", () => {
+    const code = newRecoveryCode();
+    const hash = hashRecoveryCode(normalizeRecoveryCode(code)!);
+    // As typed back by a person: lowercased, hyphens dropped, spaces added.
+    const sloppy = code.toLowerCase().replaceAll("-", " ");
+    expect(verifyRecoveryCode(normalizeRecoveryCode(sloppy)!, hash)).toBe(true);
+    expect(verifyRecoveryCode(normalizeRecoveryCode(newRecoveryCode())!, hash)).toBe(false);
+  });
+
+  it("refuses garbage instead of normalising it into a guess", () => {
+    expect(normalizeRecoveryCode(null)).toBeNull();
+    expect(normalizeRecoveryCode("too-short")).toBeNull();
+    expect(normalizeRecoveryCode(42)).toBeNull();
   });
 });
 

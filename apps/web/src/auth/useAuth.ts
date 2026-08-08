@@ -54,16 +54,28 @@ export function useAuth() {
     return () => clearTimeout(timer);
   }, []);
 
-  const run = useCallback(async (path: string, email: string, password: string) => {
+  /**
+   * The account's recovery code, held only long enough to be shown.
+   *
+   * Set when the server mints one (registration, and each successful recovery) and
+   * cleared when the panel dismisses it. Never persisted anywhere on the client: the
+   * server keeps only a hash, so this render is the code's one appearance and the
+   * user's one chance to save it — which the panel says in as many words.
+   */
+  const [recoveryCode, setRecoveryCode] = useState<string | null>(null);
+
+  const run = useCallback(async (path: string, body: Record<string, string>) => {
     setBusy(true);
     setError(null);
     try {
-      const response = await authPost(path, { email, password });
+      const response = await authPost(path, body);
       if (!response.ok) {
         setError(await errorOf(response));
         return false;
       }
-      setUser(((await response.json()) as { user: AuthUser }).user);
+      const payload = (await response.json()) as { user: AuthUser; recoveryCode?: string };
+      setUser(payload.user);
+      if (payload.recoveryCode) setRecoveryCode(payload.recoveryCode);
       return true;
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -74,11 +86,17 @@ export function useAuth() {
   }, []);
 
   const login = useCallback(
-    (email: string, password: string) => run("/api/auth/login", email, password),
+    (email: string, password: string) => run("/api/auth/login", { email, password }),
     [run],
   );
   const register = useCallback(
-    (email: string, password: string) => run("/api/auth/register", email, password),
+    (email: string, password: string) => run("/api/auth/register", { email, password }),
+    [run],
+  );
+  /** Password reset by recovery code; a success signs the user in and mints a new code. */
+  const recover = useCallback(
+    (email: string, recoveryCode: string, newPassword: string) =>
+      run("/api/auth/recover", { email, recoveryCode, newPassword }),
     [run],
   );
 
@@ -90,7 +108,19 @@ export function useAuth() {
     }
   }, []);
 
-  return { user, checked, busy, error, login, register, logout, clearError: () => setError(null) };
+  return {
+    user,
+    checked,
+    busy,
+    error,
+    login,
+    register,
+    recover,
+    logout,
+    recoveryCode,
+    dismissRecoveryCode: () => setRecoveryCode(null),
+    clearError: () => setError(null),
+  };
 }
 
 export type AuthController = ReturnType<typeof useAuth>;

@@ -27,6 +27,24 @@ export async function run({ browser, baseUrl, recorder }) {
   recorder.equal("registration signs the user in", me?.user?.email, email);
   recorder.check("header shows the account", (await a.page.locator("header").innerText()).includes("E2E+"));
 
+  // The recovery code: shown exactly once, at signup, because there is no email reset
+  // to fall back on. Captured here for the recovery flow at the end of the suite.
+  const recoveryCode = await a.page
+    .locator("[data-recovery-code]")
+    .getAttribute("data-recovery-code")
+    .catch(() => null);
+  recorder.check(
+    "signup shows a recovery code once",
+    typeof recoveryCode === "string" && /^[-0-9A-Z]{19}$/.test(recoveryCode),
+    recoveryCode ?? "none shown",
+  );
+  await a.page.getByRole("button", { name: "I SAVED IT", exact: true }).click();
+  await a.page.waitForTimeout(300);
+  recorder.check(
+    "and never shows it again after dismissal",
+    (await a.page.locator("[data-recovery-code]").count()) === 0,
+  );
+
   // The session cookie is shared across tabs of the same device.
   const tab = await a.context.newPage();
   recorder.watch(tab, "deviceA-tab2");
@@ -114,4 +132,56 @@ export async function run({ browser, baseUrl, recorder }) {
     "wrong password is rejected with a clear message",
     (await c.page.locator("text=/invalid email or password/").count()) === 1,
   );
+
+  // Recovery: a forgotten password plus the saved code becomes a new password, on a
+  // machine that has never seen this account. A wrong code fails with the same shape
+  // of message as a wrong password, confirming nothing about the address.
+  const newPassword = "missoula-sovereign-7";
+  await c.page.locator("[data-recover-toggle]").click();
+  await c.page.getByLabel("Email").fill(email);
+  await c.page.getByLabel("Recovery code").fill("AAAA-AAAA-AAAA-AAAA");
+  await c.page.getByLabel("New password").fill(newPassword);
+  await c.page.getByRole("button", { name: "RESET PASSWORD", exact: true }).click();
+  await c.page.waitForTimeout(1400);
+  recorder.check(
+    "a wrong recovery code is rejected",
+    (await c.page.locator("text=/invalid email or recovery code/").count()) === 1,
+  );
+
+  await c.page.getByLabel("Recovery code").fill(recoveryCode ?? "");
+  await c.page.getByRole("button", { name: "RESET PASSWORD", exact: true }).click();
+  await c.page.waitForSelector("text=SYNC LIBRARY", { timeout: 20_000 });
+  const recovered = await c.page.evaluate(async () => {
+    const response = await fetch("/api/auth/me");
+    return response.ok ? await response.json() : null;
+  });
+  recorder.equal("the right code signs the user in", recovered?.user?.email, email);
+  recorder.check(
+    "and mints a fresh code, because a used code is spent",
+    (await c.page.locator("[data-recovery-code]").count()) === 1 &&
+      (await c.page.locator("[data-recovery-code]").getAttribute("data-recovery-code")) !== recoveryCode,
+  );
+
+  // The reset ended every other session: device A's cookie is dead, which is the
+  // point — the code gets used when the password may be in someone else's hands.
+  const aState = await a.page.evaluate(async () => {
+    const response = await fetch("/api/auth/me");
+    return response.status;
+  });
+  recorder.equal("recovery signs out every other session", aState, 401);
+
+  // And the new password is the password now.
+  const d = await newDevice(browser, recorder, "newpass");
+  await d.page.goto(baseUrl, { waitUntil: "networkidle" });
+  await appReady(d.page);
+  await d.page.getByRole("button", { name: "SIGN IN", exact: true }).click();
+  await d.page.getByLabel("Email").fill(email);
+  await d.page.getByLabel("Password").fill(newPassword);
+  await d.page.getByRole("button", { name: "SIGN IN", exact: true }).last().click();
+  await d.page.waitForSelector("text=SYNC LIBRARY", { timeout: 20_000 });
+  const after = await d.page.evaluate(async () => {
+    const response = await fetch("/api/auth/me");
+    return response.ok ? await response.json() : null;
+  });
+  recorder.equal("the new password signs in", after?.user?.email, email);
 }

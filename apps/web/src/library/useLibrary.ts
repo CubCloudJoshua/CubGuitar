@@ -9,14 +9,18 @@ import { fromAlphaTab, fromAscii, fromMidiScore, fromMusicXml, type ImportReport
 import type { AlphaTabController } from "../useAlphaTab";
 import type { EditorController } from "../editor/useEditor";
 import {
+  clearVersions,
   deleteEntry,
   deleteRecording,
   getEntry,
   libraryOwner,
   listEntries,
+  listVersions,
   newId,
   putEntry,
+  putVersion,
   type LibraryEntry,
+  type StoredVersion,
 } from "./db";
 import { DEMO_SCORE } from "../demo";
 
@@ -81,6 +85,9 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
   const refresh = useCallback(async () => {
     setEntries(await listEntries());
   }, []);
+
+  /** When each score last got a history snapshot, for the once-a-minute throttle. */
+  const versionAtRef = useRef<Map<string, number>>(new Map());
 
   // Boot. The entry list always loads: a shared-view or collab visitor still
   // has their own library and must be able to see it. Only the *opening* of a
@@ -227,6 +234,29 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       bars: score.tracks[0]?.bars.length ?? 0,
     };
     await putEntry(entry);
+    // A version at most once a minute, written *after* the row so a crash between the
+    // two loses the snapshot and not the document. Every save inside the window rides
+    // on the previous snapshot: history is for "an hour ago", undo is for "just now",
+    // and one entry per keystroke would burn the whole cap on a single phrase.
+    const lastAt = versionAtRef.current.get(id) ?? 0;
+    // Overridable so the e2e suite can exercise dense histories without waiting real
+    // minutes; read at save time, not module load, so a test can set it after boot.
+    const interval = Number(window.localStorage.getItem("cubscore-version-interval-ms") ?? 60_000);
+    if (Date.now() - lastAt >= interval) {
+      versionAtRef.current.set(id, Date.now());
+      await putVersion({
+        id: newId(),
+        scoreId: id,
+        ownerId: entry.ownerId ?? null,
+        at: Date.now(),
+        core: entry.core ?? JSON.stringify(score),
+        tex,
+        bars: entry.bars,
+        notes: score.tracks.reduce(
+          (n, t) => n + t.bars.reduce((m, b) => m + b.voices.reduce((k, v) => k + v.beats.reduce((j, x) => j + x.notes.length, 0), 0), 0),
+        0),
+      }).catch(() => undefined);
+    }
     // Only adopt this write as "the editor's saved state" if the editor is still
     // on the row it was written for. Otherwise the next document would be
     // measured against the outgoing one's baseline and the new row would be
@@ -313,6 +343,39 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     setEditorTarget(null);
     setMode("play");
   }, [flushSave, setEditorTarget]);
+
+  /**
+   * History for the open score, and the way back into any entry of it.
+   *
+   * Restoring is an ordinary save of an old document, not time travel: the version's
+   * core becomes the row's current state through the same writeNow path every edit
+   * uses, so it bumps the revision, forks on conflict, and lands in the editor as the
+   * live document. The versions after it are untouched — restoring an hour ago does
+   * not burn the last hour's history, because a restore you regret is exactly when
+   * history is needed most.
+   */
+  const versionsFor = useCallback(async (scoreId: string): Promise<StoredVersion[]> => {
+    return listVersions(scoreId);
+  }, []);
+
+  const restoreVersion = useCallback(
+    async (version: StoredVersion) => {
+      await flushSave();
+      const entry = await getEntry(version.scoreId);
+      if (!entry) return;
+      const score = JSON.parse(version.core) as CoreScore;
+      editor.loadScore(score);
+      savedTexRef.current = AWAIT_BASELINE;
+      setEditorTarget({ id: entry.id, addedAt: entry.addedAt, rev: entry.rev ?? 0 });
+      setCurrentId(entry.id);
+      setMode("edit");
+      setLibraryOpen(false);
+      // Written down immediately rather than waiting for the next keystroke: a restore
+      // the user walks away from must survive the tab closing.
+      await writeNow({ id: entry.id, addedAt: entry.addedAt, rev: entry.rev ?? 0 }, score, version.tex);
+    },
+    [editor, flushSave, setEditorTarget, writeNow],
+  );
 
   /** Converts the open imported score into an editable document. */
   const editImported = useCallback(async () => {
@@ -574,6 +637,7 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
       // orphan tens of megabytes in a store nothing lists, which is the worst kind of
       // leak: invisible, and only noticed as a browser complaining about disk.
       await deleteRecording(id).catch(() => undefined);
+      await clearVersions(id).catch(() => undefined);
       if (id === currentId) setCurrentId(null);
       if (editorEntry?.id === id) {
         setEditorTarget(null);
@@ -604,6 +668,8 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
     startNewScore,
     importFile,
     openEntry,
+    versionsFor,
+    restoreVersion,
     removeEntry,
   };
 }

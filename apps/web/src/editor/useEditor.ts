@@ -2,6 +2,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   applyBatch,
   arrangeForFretted,
+  transposeScore,
   beginSession,
   composeAccompaniment,
   parseChord,
@@ -280,6 +281,22 @@ export function useEditor() {
       return report;
     },
     [commit, cursor.track],
+  );
+
+  /**
+   * Moves the whole document by an interval: pitches, refreshed fingerings, and the
+   * chord chart together, as one batch and so one undo. Refuses (with the reasons in
+   * the report) rather than transposing a score partially — see core/transpose.
+   */
+  const transpose = useCallback(
+    (semitones: number) => {
+      const prev = stateRef.current;
+      const { ops, report } = transposeScore(prev.score, semitones);
+      if (ops.length === 0) return report;
+      commit(ops.map(op), `Transpose ${semitones > 0 ? "+" : ""}${semitones}`);
+      return report;
+    },
+    [commit],
   );
 
   const setCommitListener = useCallback((listener: ((batch: OpBatch) => void) | null) => {
@@ -657,6 +674,7 @@ export function useEditor() {
     moveBeat,
     moveString,
     arrangeTrack,
+    transpose,
     setChord,
     setLyric,
     setSection,

@@ -53,6 +53,10 @@ export function AccountPanel({
     [loadShares],
   );
 
+  /** The recover-by-code form, shown in place of sign-in when toggled. */
+  const [recovering, setRecovering] = useState(false);
+  const [recoveryInput, setRecoveryInput] = useState("");
+
   const submit = useCallback(
     async (mode: "login" | "register") => {
       const ok = await (mode === "login" ? auth.login(email, password) : auth.register(email, password));
@@ -74,7 +78,97 @@ export function AccountPanel({
         </Button>
       </div>
 
-      {!auth.user ? (
+      {auth.recoveryCode && (
+        <div
+          data-recovery-code={auth.recoveryCode}
+          role="alert"
+          style={{
+            border: `1px solid ${color.accent}`,
+            borderRadius: 8,
+            padding: "8px 10px",
+            display: "flex",
+            flexWrap: "wrap",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <span style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.text }}>
+            Recovery code: <strong style={{ color: color.accent }}>{auth.recoveryCode}</strong>
+          </span>
+          <span style={{ flexBasis: "100%", fontFamily: font.mono, fontSize: typeScale.xs, color: color.textDim }}>
+            Write this down. It is the only way to reset a forgotten password — there is no email
+            reset — and it is shown exactly once. Using it issues a new one.
+          </span>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void navigator.clipboard?.writeText(auth.recoveryCode ?? "").catch(() => undefined)}
+          >
+            COPY
+          </Button>
+          <Button size="sm" onClick={auth.dismissRecoveryCode} style={{ color: color.textDim }}>
+            I SAVED IT
+          </Button>
+        </div>
+      )}
+
+      {!auth.user && recovering ? (
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            void auth.recover(email, recoveryInput, password).then((ok) => {
+              if (ok) {
+                setRecovering(false);
+                setRecoveryInput("");
+                setPassword("");
+              }
+            });
+          }}
+          data-recover-form=""
+          style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}
+        >
+          <TextField
+            type="email"
+            placeholder="email"
+            autoComplete="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            aria-label="Email"
+            style={{ width: 200 }}
+          />
+          <TextField
+            placeholder="recovery code"
+            value={recoveryInput}
+            onChange={(e) => setRecoveryInput(e.target.value)}
+            aria-label="Recovery code"
+            style={{ width: 200 }}
+          />
+          <TextField
+            type="password"
+            placeholder="new password (8+ chars)"
+            autoComplete="new-password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            aria-label="New password"
+            style={{ width: 190 }}
+          />
+          <Button type="submit" variant="outline" disabled={auth.busy} style={{ fontWeight: 700 }}>
+            RESET PASSWORD
+          </Button>
+          <Button type="button" onClick={() => setRecovering(false)} style={{ color: color.textDim }}>
+            BACK
+          </Button>
+          {auth.error && (
+            <span style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.dangerText }}>
+              {auth.error}
+            </span>
+          )}
+          <span style={{ flexBasis: "100%", fontFamily: font.mono, fontSize: typeScale.xs, color: color.textDim }}>
+            The code from when you created the account. Resetting signs out every other session and
+            issues a fresh code.
+          </span>
+        </form>
+      ) : !auth.user ? (
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -105,6 +199,15 @@ export function AccountPanel({
           </Button>
           <Button type="button" variant="outline" disabled={auth.busy} onClick={() => void submit("register")}>
             CREATE ACCOUNT
+          </Button>
+          <Button
+            type="button"
+            data-recover-toggle=""
+            onClick={() => setRecovering(true)}
+            style={{ color: color.textDim }}
+            title="Reset your password with the recovery code you saved at signup"
+          >
+            FORGOT?
           </Button>
           {auth.error && (
             <span style={{ fontFamily: font.mono, fontSize: typeScale.sm, color: color.dangerText }}>

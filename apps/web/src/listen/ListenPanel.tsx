@@ -255,11 +255,21 @@ export function PracticeStrip({
   summary,
   barCount,
   onClear,
+  onDrill,
 }: {
   summary: PracticeSummary;
   /** Bars in the score, for the passage tempo. */
   barCount: number;
   onClear: () => void;
+  /**
+   * Loops one of the plan's bars at the tempo the record says it is clean at.
+   *
+   * The plan knowing which bar to work on and the loop being three manual steps away
+   * (find the bar, drag the region, guess a speed) is measurement without action;
+   * this is the button that closes that gap. `bpm` is null when the bar has no clean
+   * take yet, and the caller keeps the current speed.
+   */
+  onDrill: (bar: number, bpm: number | null) => void;
 }) {
   if (summary.takes === 0) return null;
   const drill = summary.drill.slice(0, 3);
@@ -295,7 +305,27 @@ export function PracticeStrip({
       {drill.length > 0 ? (
         <span style={cell} data-practice-drill={drill.map((b) => b + 1).join(",")}>
           Work on bar{drill.length === 1 ? "" : "s"}{" "}
-          <span style={{ color: heat.wrong }}>{drill.map((b) => b + 1).join(", ")}</span>
+          {drill.map((b) => (
+            <button
+              key={b}
+              data-practice-drill-bar={b + 1}
+              onClick={() => onDrill(b, passageTempo(summary.bars, b, b))}
+              title="Loop this bar at the tempo you last played it cleanly"
+              style={{
+                background: "none",
+                border: `1px solid ${heat.wrong}`,
+                borderRadius: 6,
+                color: heat.wrong,
+                fontFamily: font.mono,
+                fontSize: typeScale.xs,
+                padding: "1px 7px",
+                marginRight: 4,
+                cursor: "pointer",
+              }}
+            >
+              {b + 1}
+            </button>
+          ))}
         </span>
       ) : (
         <span style={dim}>Nothing due — every bar is clean and rested</span>

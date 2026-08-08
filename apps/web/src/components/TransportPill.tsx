@@ -156,6 +156,7 @@ export function TransportPill({ c, transport }: { c: AlphaTabController; transpo
 
   return (
     <div
+      data-loop-active={c.loop && c.loopRange ? "true" : "false"}
       style={{
         position: "fixed",
         bottom: 16,
