@@ -3,7 +3,14 @@ import { useAlphaTab } from "./useAlphaTab";
 import { useNarrow } from "./useNarrow";
 import { useEditor } from "./editor/useEditor";
 import { useLibrary } from "./library/useLibrary";
-import { adoptUnowned, setLibraryOwner } from "./library/db";
+import {
+  adoptUnowned,
+  deleteRecording,
+  getRecording,
+  libraryOwner,
+  putRecording,
+  setLibraryOwner,
+} from "./library/db";
 import { useSharedView } from "./share/useSharedView";
 import { useShareLink } from "./share/useShareLink";
 import { useAuth } from "./auth/useAuth";
@@ -17,7 +24,7 @@ import { BarHeat, ListenReadout, PracticeStrip } from "./listen/ListenPanel";
 import { usePracticeHistory } from "./listen/usePracticeHistory";
 import { useRecording } from "./sync/useRecording";
 import { RecordingAudio, RecordingBar } from "./sync/RecordingBar";
-import { alignmentOf, type Alignment } from "@cubscore/core";
+import { alignmentOf, type Alignment, type SyncPoint } from "@cubscore/core";
 import { frettedGuitar, STANDARD_BASS, timeline as buildTimeline } from "@cubscore/core";
 import { EditorBar } from "./editor/EditorBar";
 import { TrackRail } from "./editor/TrackRail";
@@ -230,13 +237,12 @@ export function App() {
   const practice = usePracticeHistory(editing ? lib.currentId ?? null : null);
 
   /**
-   * A recording locked to the score (sync/useRecording).
+   * A recording locked to the score (sync/useRecording), kept with it in the library.
    *
-   * The marks live in this component's state rather than in the library, deliberately for
-   * now: the audio itself is an object URL that dies with the tab, so storing an
-   * alignment that outlives the file it aligns would leave a user with marks against a
-   * recording the app cannot find. Persisting both together is the next step and belongs
-   * with the audio, not ahead of it.
+   * The audio and the marks are stored together in one row, because either alone is
+   * useless: a mark says "this moment of *this* recording is that moment of the score",
+   * so an alignment without its audio points at a file the app cannot find, and audio
+   * without its alignment is a file the user has to tap in again.
    */
   const [alignment, setAlignment] = useState<Alignment>(() => alignmentOf([]));
   const [recordingOpen, setRecordingOpen] = useState(false);
@@ -248,6 +254,96 @@ export function App() {
     onAlignmentChange: setAlignment,
   });
   recordingRef.current = { playing: recording.playing, seekToScore: recording.seekToScore };
+
+  /**
+   * The recording follows the score it belongs to, in and out of storage.
+   *
+   * Two effects, and they have to be told apart or they fight: the first puts a stored
+   * recording back when a score opens, the second writes changes down. The guard that
+   * keeps them apart is `loadedFor` — the id whose recording is currently in the player.
+   * Without it the load writes what it just read, and worse, a score with no recording
+   * would have the *previous* score's audio written onto it the moment it opened.
+   */
+  const { restore: restoreRecording, detach: detachRecording } = recording;
+  const loadedFor = useRef<string | null>(null);
+  /**
+   * The score whose recording has finished loading, which is not the same as the score
+   * whose recording has *started* loading.
+   *
+   * Persisting keys off this one. Reading from storage is asynchronous and opening a score
+   * is not, so between the two there is a moment when the player holds no audio for a
+   * score that has some — and a writer keying off the id alone treats that moment as "the
+   * user has no recording" and deletes the row it was about to read. Which it did.
+   */
+  const hydratedFor = useRef<string | null>(null);
+  useEffect(() => {
+    const scoreId = lib.currentId;
+    if (loadedFor.current === scoreId) return;
+    loadedFor.current = scoreId;
+    hydratedFor.current = null;
+    // Whatever was in the player belongs to the score being left.
+    detachRecording();
+    setAlignment(alignmentOf([]));
+    if (!scoreId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const stored = await getRecording(scoreId);
+        // Two scores opened quickly would otherwise land the first one's audio on the
+        // second, since the read is asynchronous and the click is not.
+        if (cancelled || loadedFor.current !== scoreId) return;
+        if (stored) {
+          restoreRecording(stored.blob, stored.fileName);
+          setAlignment(alignmentOf(JSON.parse(stored.marks) as SyncPoint[]));
+        }
+      } catch (cause) {
+        // A recording that cannot be read must not stop the score opening. The score is
+        // what the user asked for; the backing track is an accompaniment to it.
+        console.warn("recording could not be restored", cause);
+      } finally {
+        // Set whether or not anything was found, and only once the read is done: from
+        // here on, an empty player genuinely means the user has no recording.
+        if (!cancelled && loadedFor.current === scoreId) hydratedFor.current = scoreId;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [lib.currentId, restoreRecording, detachRecording]);
+
+  const recordingBlob = recording.blob;
+  const recordingName = recording.fileName;
+  useEffect(() => {
+    const scoreId = lib.currentId;
+    // Only once this score's own recording has been read back. Keying off the score being
+    // *open* instead let this run in the gap before the read returned, where it saw an
+    // empty player and deleted the recording it was in the middle of loading.
+    if (!scoreId || hydratedFor.current !== scoreId) return;
+    void (async () => {
+      try {
+        if (!recordingBlob || !recordingName) {
+          await deleteRecording(scoreId);
+          return;
+        }
+        await putRecording({
+          scoreId,
+          ownerId: libraryOwner(),
+          blob: recordingBlob,
+          fileName: recordingName,
+          marks: JSON.stringify(alignment.points),
+          addedAt: Date.now(),
+        });
+      } catch (cause) {
+        // The size limit lands here, and it is the one a user can act on.
+        lib.setImportNotice({
+          unsupported: [cause instanceof Error ? cause.message : "This recording could not be kept with the score."],
+          trackCount: 0,
+          barCount: 0,
+          noteCount: 0,
+        });
+      }
+    })();
+  }, [lib.currentId, recordingBlob, recordingName, alignment, lib.setImportNotice]);
   /**
    * Stores a take when playback stops.
    *

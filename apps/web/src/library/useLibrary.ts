@@ -8,7 +8,16 @@ import { toAlphaTex, type Score as CoreScore } from "@cubscore/core";
 import { fromAlphaTab, fromAscii, fromMidiScore, fromMusicXml, type ImportReport } from "@cubscore/formats";
 import type { AlphaTabController } from "../useAlphaTab";
 import type { EditorController } from "../editor/useEditor";
-import { deleteEntry, getEntry, libraryOwner, listEntries, newId, putEntry, type LibraryEntry } from "./db";
+import {
+  deleteEntry,
+  deleteRecording,
+  getEntry,
+  libraryOwner,
+  listEntries,
+  newId,
+  putEntry,
+  type LibraryEntry,
+} from "./db";
 import { DEMO_SCORE } from "../demo";
 
 type Mode = "play" | "edit";
@@ -561,6 +570,10 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
   const removeEntry = useCallback(
     async (id: string) => {
       await deleteEntry(id);
+      // The recording belongs to the score, so it goes with it. Leaving it behind would
+      // orphan tens of megabytes in a store nothing lists, which is the worst kind of
+      // leak: invisible, and only noticed as a browser complaining about disk.
+      await deleteRecording(id).catch(() => undefined);
       if (id === currentId) setCurrentId(null);
       if (editorEntry?.id === id) {
         setEditorTarget(null);

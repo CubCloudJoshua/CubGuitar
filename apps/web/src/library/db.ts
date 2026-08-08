@@ -8,7 +8,7 @@
  */
 
 const DB_NAME = "cubscore";
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 const STORE = "scores";
 /**
  * Graded takes, one row per play-through.
@@ -19,6 +19,17 @@ const STORE = "scores";
  * raced the same save.
  */
 const TAKES = "takes";
+/**
+ * The audio a score is played along with, and the marks aligning the two.
+ *
+ * Its own store, keyed by score, for two reasons. A recording is tens of megabytes
+ * against a score row's tens of kilobytes, and that row is rewritten on every keystroke —
+ * carrying the audio inside it would mean rewriting the whole file on every edit. And the
+ * two belong together: marks say "this moment of *this* recording is that moment of the
+ * score", so an alignment kept without the audio it aligns is an alignment against a file
+ * the app cannot find. One row holds both or neither.
+ */
+const RECORDINGS = "recordings";
 
 export type ScoreFormat = "gp" | "altex";
 
@@ -65,6 +76,9 @@ function open(): Promise<IDBDatabase> {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE)) {
         db.createObjectStore(STORE, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(RECORDINGS)) {
+        db.createObjectStore(RECORDINGS, { keyPath: "scoreId" });
       }
       if (!db.objectStoreNames.contains(TAKES)) {
         const takes = db.createObjectStore(TAKES, { keyPath: "id" });
@@ -228,4 +242,67 @@ export async function clearTakes(scoreId: string): Promise<void> {
   await Promise.all(
     rows.map((row) => tx<undefined>("readwrite", (s) => s.delete(row.id) as IDBRequest<undefined>, TAKES)),
   );
+}
+
+/**
+ * A score's backing recording: the audio itself, and the marks that align it.
+ *
+ * The blob is stored rather than an object URL. A URL is a handle to memory owned by one
+ * document and dies with the tab, which is exactly why marks could not be kept before
+ * this store existed — an alignment outliving its audio points at nothing.
+ */
+export interface StoredRecording {
+  /** The library entry this recording belongs to. One recording per score. */
+  scoreId: string;
+  ownerId?: string | null;
+  /** The audio itself. Rehydrated into an object URL when the score opens. */
+  blob: Blob;
+  fileName: string;
+  /** JSON of core's SyncPoint[], the marks pairing recording seconds to score seconds. */
+  marks: string;
+  addedAt: number;
+}
+
+/**
+ * The largest recording that will be kept, in bytes.
+ *
+ * A limit, not a guess at what a browser will tolerate. IndexedDB quota is a fraction of
+ * free disk that no page can ask about reliably, so a file large enough to blow it fails
+ * at write time with an error a user cannot act on. Refusing up front, with the number
+ * stated, is the honest version of the same limit: 60MB holds an hour of decent MP3 and
+ * every real backing track anybody plays along to.
+ */
+export const MAX_RECORDING_BYTES = 60 * 1024 * 1024;
+
+/** The recording kept for a score, or undefined. Filtered by owner like everything else. */
+export async function getRecording(scoreId: string): Promise<StoredRecording | undefined> {
+  await ownerKnown;
+  const row = await tx<StoredRecording | undefined>(
+    "readonly",
+    (s) => s.get(scoreId) as IDBRequest<StoredRecording | undefined>,
+    RECORDINGS,
+  );
+  if (!row) return undefined;
+  return (row.ownerId ?? null) === owner ? row : undefined;
+}
+
+/**
+ * Keeps a recording with its score, replacing whatever was there.
+ *
+ * Rejects a file past `MAX_RECORDING_BYTES` rather than letting the write fail deep in
+ * IndexedDB, so the caller has something to tell the user.
+ */
+export async function putRecording(recording: StoredRecording): Promise<void> {
+  if (recording.blob.size > MAX_RECORDING_BYTES) {
+    throw new Error(
+      `This recording is ${Math.round(recording.blob.size / 1024 / 1024)}MB. ` +
+        `CubScore keeps recordings up to ${Math.round(MAX_RECORDING_BYTES / 1024 / 1024)}MB with a score.`,
+    );
+  }
+  await tx<IDBValidKey>("readwrite", (s) => s.put(recording), RECORDINGS);
+}
+
+/** Forgets a score's recording, marks and all. Detaching is the only way here. */
+export async function deleteRecording(scoreId: string): Promise<void> {
+  await tx<undefined>("readwrite", (s) => s.delete(scoreId) as IDBRequest<undefined>, RECORDINGS);
 }

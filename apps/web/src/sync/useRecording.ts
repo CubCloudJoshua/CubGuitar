@@ -40,6 +40,14 @@ export interface RecordingController {
   /** An object URL for the attached audio, or null when there is none. */
   url: string | null;
   fileName: string | null;
+  /**
+   * The audio itself, for the caller to keep with the score.
+   *
+   * The blob and not the URL: a URL is a handle to memory owned by one document and dies
+   * with the tab, which is what kept recordings — and therefore marks — from being stored
+   * at all before now.
+   */
+  blob: Blob | null;
   playing: boolean;
   /** Where the recording is, in its own seconds. */
   seconds: number;
@@ -51,6 +59,15 @@ export interface RecordingController {
   speed: number;
 
   attach: (file: File) => void;
+  /**
+   * Puts back a recording that was stored with the score, marks and all.
+   *
+   * Distinct from `attach` in exactly one way, and it is the important one: attaching a
+   * *new* file clears the marks, because a mark means "this moment of this recording",
+   * and restoring must not. Sharing one function and a flag was the alternative, and a
+   * flag that silently erases a user's alignment is worth a second function.
+   */
+  restore: (blob: Blob, fileName: string) => void;
   detach: () => void;
   playPause: () => void;
   /** Marks the recording's current moment as the score's current moment. */
@@ -93,6 +110,7 @@ export function useRecording(deps: Deps): RecordingController {
   const [playing, setPlaying] = useState(false);
   const [seconds, setSeconds] = useState(0);
   const [duration, setDuration] = useState(0);
+  const [blob, setBlob] = useState<Blob | null>(null);
   const audio = useRef<HTMLAudioElement | null>(null);
   /**
    * The object URL currently handed out, so it can be released exactly once.
@@ -132,6 +150,7 @@ export function useRecording(deps: Deps): RecordingController {
       objectUrl.current = next;
       setUrl(next);
       setFileName(file.name);
+      setBlob(file);
       setSeconds(0);
       setPlaying(false);
       // A mark says "this moment of *this* recording is that moment of the score", so
@@ -142,14 +161,34 @@ export function useRecording(deps: Deps): RecordingController {
     [release],
   );
 
+  const restore = useCallback(
+    (stored: Blob, name: string) => {
+      release();
+      const next = URL.createObjectURL(stored);
+      objectUrl.current = next;
+      setUrl(next);
+      setFileName(name);
+      setBlob(stored);
+      setSeconds(0);
+      setPlaying(false);
+      // No `onAlignmentChange` here. The marks came out of storage with this audio and
+      // are the whole reason it was worth keeping.
+    },
+    [release],
+  );
+
   const detach = useCallback(() => {
     audio.current?.pause();
     release();
     setUrl(null);
     setFileName(null);
+    setBlob(null);
     setPlaying(false);
     setSeconds(0);
     live.current.setSynthMuted(false);
+    // Detaching drops the marks too. They align a recording that is no longer here, and
+    // keeping them would silently apply one file's alignment to the next one attached.
+    live.current.onAlignmentChange(alignmentOf([]));
   }, [release]);
 
   const playPause = useCallback(() => {
@@ -236,6 +275,7 @@ export function useRecording(deps: Deps): RecordingController {
   return {
     url,
     fileName,
+    blob,
     playing,
     seconds,
     duration,
@@ -243,6 +283,7 @@ export function useRecording(deps: Deps): RecordingController {
     suspects,
     speed,
     attach,
+    restore,
     detach,
     playPause,
     mark,

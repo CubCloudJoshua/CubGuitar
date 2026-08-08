@@ -171,10 +171,63 @@ export async function run({ browser, baseUrl, recorder }) {
     `marks ${await attr(page, "data-recording-marks")}`,
   );
 
+  /**
+   * The recording and its marks are kept with the score, and a reload proves it.
+   *
+   * This is the whole reason marks could be stored at all. The audio used to be an object
+   * URL — a handle to memory owned by one document, gone the moment the tab is — so an
+   * alignment that outlived it would have pointed at a file the app could not find. Both
+   * go into one row now, or neither does.
+   */
+  await page.locator("[data-recording-mark]").click();
+  await page.waitForTimeout(300);
+  await page.locator("[data-recording-mark]").click();
+  await page.waitForTimeout(1500);
+  const markedBefore = await attr(page, "data-recording-marks");
+  recorder.check("marks are in place before the reload", markedBefore === "1", `marks ${markedBefore}`);
+
+  await page.reload({ waitUntil: "networkidle" });
+  await appReady(page);
+  await page.getByRole("button", { name: "RECORDING", exact: true }).click();
+  await page.waitForTimeout(1800);
+  recorder.check(
+    "the recording is still attached after a reload",
+    (await page.locator("[data-recording-pick]").count()) === 0,
+    (await page.locator("body").innerText()).slice(0, 120),
+  );
+  recorder.check(
+    "and its marks came back with it",
+    (await attr(page, "data-recording-marks")) === markedBefore,
+    `marks ${await attr(page, "data-recording-marks")}`,
+  );
+  // Playable, not merely listed: a blob that came out of storage has to be something the
+  // audio element will actually accept.
+  await page.locator("[data-recording-play]").click();
+  await page.waitForTimeout(1400);
+  const movedAfterReload = await scoreSeconds(page);
+  recorder.check(
+    "the restored recording plays and the notation follows it",
+    typeof movedAfterReload === "number" && movedAfterReload > 0,
+    `score at ${movedAfterReload}`,
+  );
+  await page.locator("[data-recording-play]").click();
+  await page.waitForTimeout(400);
+
   await page.getByRole("button", { name: "REMOVE", exact: true }).click();
   await page.waitForTimeout(500);
   recorder.check(
     "removing the recording goes back to asking for one",
+    (await page.locator("[data-recording-pick]").count()) === 1,
+  );
+
+  // Removing has to reach storage too, or the next reload brings back what the user
+  // just took away.
+  await page.reload({ waitUntil: "networkidle" });
+  await appReady(page);
+  await page.getByRole("button", { name: "RECORDING", exact: true }).click();
+  await page.waitForTimeout(1600);
+  recorder.check(
+    "a removed recording stays removed across a reload",
     (await page.locator("[data-recording-pick]").count()) === 1,
   );
 
