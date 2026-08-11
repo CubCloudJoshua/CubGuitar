@@ -87,8 +87,10 @@ that will be quoted most often.
 > **Measured, and it moved this up the list.** Phase R was filed as a licence
 > project. It is not: it is the ceiling on the editor. A keystroke costs 20ms on the
 > four-bar demo and 1,776ms on a 274-bar song, and `pnpm editperf` now fails the build
-> on that. The cost is alphaTab re-laying-out the score, not our alphaTex round trip —
-> parsing Stairway's tex is ~10ms of a 967ms keystroke.
+> on that. Our own alphaTex serializer is not the problem — writing Stairway's tex is
+> ~10ms of a 967ms keystroke. The cost is on alphaTab's side of the call, and the section
+> below revises which part: it is roughly half re-layout and half the load pipeline that
+> runs before it, not layout alone as first assumed.
 >
 > Three levers were tried and measured, all of them alphaTab's own:
 >
@@ -123,13 +125,33 @@ that will be quoted most often.
 > somewhere the render-window levers in the table above cannot reach, which is the
 > likeliest explanation for why the best of them stalls at 478ms.
 >
-> That half is not our alphaTex serialization, measured above at ~10ms, and it is not
-> the layout, which is the part `renderStarted`/`postRenderFinished` bracket. What it
-> *is* has not been identified. The candidates worth an hour before Phase R starts:
-> alphaTab's own alphaTex reader, `Score.finish()`, and the player's MIDI regeneration,
-> which runs on every load and scales with the whole document. If it turns out to be
-> the MIDI, that is a much cheaper fix than an engraver — regenerate it on play rather
-> than on every keystroke — and it would change the sequencing in §8.
+> That half is not the layout, which is the part `renderStarted`/`postRenderFinished`
+> bracket. **It is alphaTab's own load pipeline, and it is not the player.** Timing
+> `api.tex()` itself, median of five keystrokes:
+>
+> | | Stairway (166 bars) | Achilles (274 bars) |
+> | --- | --- | --- |
+> | Blocked in `api.tex()`, player on | 375ms | 1,134ms |
+> | Blocked in `api.tex()`, `PlayerMode.Disabled` | 317ms | 864ms |
+>
+> So the player's MIDI regeneration is 15% of it on one score and 24% on the other:
+> real, but not a fix. Turning it off buys a quarter of half a keystroke and costs
+> playback, and it would have to come back on when someone presses play, which is a
+> whole engrave at the worst moment. Not worth it.
+>
+> The remaining 864ms is alphaTab's alphaTex reader and `Score.finish()`. Worth being
+> exact about, because the ~10ms figure above is easy to misread: that is *our* serializer
+> writing the tex. alphaTab reading the same file back is ~317ms. So an edit currently
+> pays to serialize a document we already hold in memory, have someone else parse it back
+> into a model we already have, and then lay all of it out.
+>
+> **That strengthens Phase R rather than offering a shortcut.** There is no lever left
+> in alphaTab's settings for the blocked half — the levers in the first table only touch
+> the render phase, which is why the best of them stalled at 478ms. An engraver reading
+> our own `Score` skips the serialize, the parse and the finish outright, before it draws
+> a single stem. The remaining alternative, mutating alphaTab's live `Score` model in
+> place and calling `api.render()`, skips the same three, and is most of the work of
+> owning the model without any of the benefit of owning the output.
 >
 > Two consequences already banked, neither of them Phase R:
 >
