@@ -103,10 +103,22 @@ pnpm corpus     # load and render every score in fixtures/ and corpus/
 pnpm audio      # synthesize every score to samples and confirm it makes sound
 pnpm transcribe # play every score, hear it back, and grade the recovered notation
 pnpm e2e        # drive the built app in a browser across ten journeys
+pnpm deploycheck # run the compiled services as an operator would, and check the packaging
 ```
 
-CI runs build, unit tests, the corpus suite (including import round-trip pitch
-fidelity), the audio check, and the end-to-end suites on every push.
+CI runs build, unit tests, the deployable-artifact check, the corpus suite (including
+import round-trip pitch fidelity), the audio, timing, MIDI, MusicXML and transcription
+oracles, and the end-to-end suites on every push. It deliberately does not run
+`pnpm editperf`: that is a wall-clock gate, a shared runner has measured a 2× spread on
+the same keystrokes, and the scores large enough to be worth measuring are gitignored.
+
+`pnpm deploycheck` runs each service's compiled `dist/server.js` under plain `node` with
+the environment DEPLOY.md specifies, and checks the packaging rather than the behaviour:
+that the artifacts exist at all, that nothing in the compiled output imports a
+devDependency, that `HOST` really moves the socket, that the session cookie is `Secure`
+when `COOKIE_SECURE=1` and is not when it is unset, that the sync service completes a
+real websocket handshake, and that no dev origin is baked into the web bundle. Deploying
+is DEPLOY.md.
 
 `pnpm audio` exists because nobody involved has heard this app. It is built and
 tested in headless browsers with no audio device, so every other gate checks the

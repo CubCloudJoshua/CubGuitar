@@ -31,6 +31,19 @@ import {
 } from "./store.js";
 
 const PORT = Number(process.env.PORT ?? 8787);
+/**
+ * Loopback by default, on purpose: this service has no TLS and expects a reverse
+ * proxy in front of it, so a default that listened on every interface would put
+ * session cookies on the wire in plain text the first time someone ran it on a box
+ * with a public address.
+ *
+ * Overridable because a container's loopback is its own. Inside one, 127.0.0.1
+ * cannot be reached from anywhere else in the deployment, so the service came up
+ * healthy and answered nobody. HOST=0.0.0.0 is correct there and wrong on a host
+ * that is not behind a proxy — which is why it is a decision the deployment makes
+ * rather than a default. See DEPLOY.md.
+ */
+const HOST = process.env.HOST ?? "127.0.0.1";
 const DATA_DIR =
   process.env.CUBSCORE_DATA ??
   path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "data");
@@ -447,8 +460,8 @@ users
     if (added > 0) console.log(`cubscore api: indexed ${added} pre-existing email(s)`);
   })
   .catch((err) => console.error("cubscore api: email index migration failed", err))
-  .then(() => app.listen({ port: PORT, host: "127.0.0.1" }))
-  .then(() => console.log(`cubscore api on :${PORT}, data in ${DATA_DIR}`))
+  .then(() => app.listen({ port: PORT, host: HOST }))
+  .then(() => console.log(`cubscore api on ${HOST}:${PORT}, data in ${DATA_DIR}`))
   .catch((err) => {
     console.error(err);
     process.exit(1);

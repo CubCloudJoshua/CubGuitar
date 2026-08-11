@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "tsx src/server.ts",
+    "start": "node dist/server.js",
     "typecheck": "tsc --noEmit",
-    "build": "tsc --noEmit"
+    "build": "tsc -p tsconfig.build.json"
   },
   "dependencies": {
     "ws": "^8.18.0"

@@ -1,0 +1,19 @@
+/*
+ * Emits the deployable artifact. The sibling tsconfig.json is typecheck-only
+ * (noEmit), which is all this service had: `pnpm build` proved the code compiled
+ * and then produced nothing to run, so deploying meant running tsx — a
+ * devDependency, absent after `pnpm install --prod`. Tests are excluded because
+ * a production image has no test runner to satisfy their imports.
+ */
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": false,
+    "sourceMap": true
+  },
+  "include": ["src"],
+  "exclude": ["src/**/*.test.ts"]
+}

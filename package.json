@@ -17,7 +17,8 @@
     "midi": "node tools/midi-check.mjs",
     "musicxml": "node tools/musicxml-check.mjs",
     "transcribe": "node tools/transcribe-check.mjs",
-    "editperf": "node tools/edit-perf.mjs"
+    "editperf": "node tools/edit-perf.mjs",
+    "deploycheck": "node tools/deploy-check.mjs"
   },
   "engines": {
     "node": ">=22"

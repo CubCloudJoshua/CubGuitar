@@ -30,6 +30,15 @@ jobs:
       - name: Unit tests
         run: pnpm test
 
+      # Runs the compiled services under plain node with the environment DEPLOY.md
+      # specifies. Every other step here exercises the code through a dev server or a
+      # bundler; this one exercises the thing that would actually be deployed, which
+      # until recently did not exist — both services built with `tsc --noEmit`. Cheap,
+      # deterministic, and it catches a devDependency reaching production code, which
+      # is invisible in dev and fatal after `pnpm install --prod`.
+      - name: Deployable artifacts
+        run: pnpm deploycheck
+
       - name: Install Chromium for the corpus suite
         run: pnpm exec playwright install --with-deps chromium
 
@@ -67,7 +76,22 @@ jobs:
       - name: MusicXML agrees with alphaTab
         run: pnpm musicxml
 
+      # Audio back to notation, graded against labels the corpus generates for free:
+      # timeline() says exactly what a perfect detector would report for each file, so
+      # every score is a worked example nobody had to annotate. Runs on the committed
+      # fixtures here — the real Guitar Pro files are gitignored, so a developer with a
+      # corpus grades a harder set than CI does.
+      - name: Transcription accuracy
+        run: pnpm transcribe
+
       # Drives the built app in a real browser across every journey, standing up the
       # API and sync services against a throwaway data directory.
       - name: End-to-end suites
         run: pnpm e2e
+
+      # `pnpm editperf` is deliberately NOT run here. It is a wall-clock gate, and on a
+      # shared runner the same six keystrokes have measured a 2x spread, so it would fail
+      # for reasons that have nothing to do with the commit. It also needs the gitignored
+      # corpus to measure anything that matters: without it the only score available is
+      # four bars, which passes trivially. Run it locally with a corpus. See
+      # tools/edit-perf.mjs and STANDALONE.md §3.

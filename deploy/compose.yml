@@ -1,0 +1,86 @@
+# CubScore: two node services and a proxy.
+#
+# NOT VERIFIED BY ANY GATE IN THIS REPO — see the note at the top of Dockerfile.
+# `pnpm deploycheck` proves the compiled services run and are configured correctly;
+# it does not build this.
+#
+#   docker compose -f deploy/compose.yml up -d --build
+#
+# Set COOKIE_SECURE=0 only for a plain-HTTP trial on a machine nobody else can
+# reach. On anything with a real address it means session cookies in clear text.
+
+name: cubscore
+
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["node", "services/api/dist/server.js"]
+    environment:
+      PORT: "8787"
+      # A container's loopback is its own, so 127.0.0.1 here would come up healthy
+      # and be reachable by nobody. Safe because the port is never published: only
+      # the proxy on this network can reach it.
+      HOST: "0.0.0.0"
+      CUBSCORE_DATA: /data
+      # The proxy is the only way in and it appends the real peer address, so the
+      # last X-Forwarded-For token is trustworthy and per-IP rate limits are real.
+      TRUST_PROXY: "1"
+      # A promise that the proxy terminates TLS. If it does not, the browser drops
+      # the cookie and nobody can stay signed in.
+      COOKIE_SECURE: "1"
+    volumes:
+      - cubscore-data:/data
+    # No `ports:`. Publishing 8787 would put an HTTP service with session cookies
+    # on the host's public interface, beside the TLS the proxy is there to provide.
+    expose:
+      - "8787"
+    restart: unless-stopped
+
+  sync:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["node", "services/sync/dist/server.js"]
+    environment:
+      PORT: "8788"
+      HOST: "0.0.0.0"
+    expose:
+      - "8788"
+    # Collab rooms live in this process's memory, so a restart ends every live
+    # session. Deliberately not `always`: a crash loop that silently drops rooms is
+    # worse than a service that stays down and is noticed.
+    restart: unless-stopped
+
+  proxy:
+    image: nginx:1.27-alpine
+    depends_on:
+      - api
+      - sync
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - cubscore-web:/usr/share/nginx/html:ro
+    restart: unless-stopped
+
+  # Copies the built bundle out of the app image into the volume nginx serves, then
+  # exits. A one-shot rather than a shared build stage because nginx's image has no
+  # node in it and the app image has no nginx: this is the seam between them, and it
+  # runs again on every `up`, which is what makes a redeploy replace the bundle.
+  web-assets:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    command: ["sh", "-c", "rm -rf /web/* && cp -r apps/web/dist/. /web/"]
+    user: root
+    volumes:
+      - cubscore-web:/web
+    restart: "no"
+
+volumes:
+  # The only stateful thing in the deployment: accounts, sessions, shared scores and
+  # cloud libraries, as files. Back this up. See DEPLOY.md.
+  cubscore-data:
+  cubscore-web:
