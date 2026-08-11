@@ -13,14 +13,21 @@
  * time and time into the editor come with it, since both scale the same way and both
  * would otherwise regress unnoticed.
  *
+ * That makes the tool only as honest as the indicator, and for a while it was not: alphaTab
+ * parses a whole score synchronously before it announces a render, so the indicator went
+ * dark through the most expensive part and this tool called the keystroke finished there.
+ * It reported 173ms on a score that takes three seconds. The app now says it is engraving
+ * from the moment it accepts a keystroke (apps/web/src/useAlphaTab.ts, loadTex), which is
+ * true for the user and true for the measurement.
+ *
  * The budget is not currently met on real songs and that is the point of having it.
  * Measured against alphaTab's own levers — its live-editing render hint and its
- * bar-window settings — the floor is around 480ms, against a 100ms budget. See
- * STANDALONE.md §3: this number is the case for our own engraver, and this tool is how
- * that case will be judged when one exists.
+ * bar-window settings — one engrave costs a second and a half on a 274-bar score against a
+ * 100ms budget. See STANDALONE.md §3: this number is the case for our own engraver, and
+ * this tool is how that case will be judged when one exists.
  *
  * Usage: pnpm build && pnpm editperf
- * Exits non-zero if a keystroke on any score is slower than the budget below.
+ * Exits non-zero on any row `judge` below rejects.
  */
 import { existsSync } from "node:fs";
 import { readdir, readFile } from "node:fs/promises";
@@ -51,6 +58,50 @@ const BUDGET_MS = Number(process.env.EDIT_PERF_BUDGET ?? 100);
 
 /** Keystrokes per score. Enough to have a median that is not one unlucky frame. */
 const SAMPLES = 7;
+
+/** Frets in the burst. See the BURST6 comment in `measure`. */
+const BURST_KEYSTROKES = 6;
+
+/**
+ * The most engraves a burst may cost on a score where engraving is already slow.
+ *
+ * Half the keystrokes, and the threshold is set from measurement on both real scores in
+ * the corpus rather than picked. With coalescing the 274-bar score spends two or three and
+ * the 166-bar score one; without it, five and six. Anything in between would be a rule
+ * with no margin on one side and no teeth on the other.
+ *
+ * "Strictly fewer than the keystrokes" was the first attempt and it does not work: on the
+ * largest score the parse blocks the main thread long enough that two keystrokes land in
+ * the same pass by accident, so the un-coalesced build scored five of six and passed.
+ */
+const BURST_ENGRAVE_LIMIT = Math.floor(BURST_KEYSTROKES / 2);
+
+/**
+ * What makes a row fail.
+ *
+ * Two properties, because the editor has two ways of being unusable and only one of them
+ * is a latency number. A keystroke over budget is the first, and on real songs it is
+ * currently expected — see the header. The second is the pile-up: typing that buys one
+ * whole engrave per keystroke gets further behind with every letter, so on a score where
+ * engraving is already slow a burst has to coalesce. Under budget it must not: holding a
+ * keystroke back on a score that answers in thirty milliseconds spends something a user
+ * notices to save something they do not.
+ *
+ * A missing count fails too. It means the `data-engraves` hook moved, and a check that
+ * silently stops checking is worse than no check.
+ */
+function judge(row) {
+  if (row.errors.length > 0) return `PAGE ERROR — ${row.errors[0]}`;
+  if (row.engraves === null) return "NO ENGRAVE COUNT (data-engraves hook missing)";
+  if (row.engraves > BURST_KEYSTROKES) return `${row.engraves} engraves for ${BURST_KEYSTROKES} keystrokes`;
+  const slow = row.median > BUDGET_MS;
+  if (slow && row.engraves > BURST_ENGRAVE_LIMIT) {
+    return `NOT COALESCING (${row.engraves} engraves, limit ${BURST_ENGRAVE_LIMIT})`;
+  }
+  if (!slow && row.engraves < BURST_KEYSTROKES) return `COALESCING UNDER BUDGET (${row.engraves} engraves)`;
+  if (slow) return `OVER BUDGET (${BUDGET_MS}ms)`;
+  return null;
+}
 
 async function listCorpus() {
   try {
@@ -100,6 +151,17 @@ async function measure(browser, label, open) {
 
   await open(page);
 
+  /**
+   * EDITOR conflates two things on a large score, and should be read with that in mind.
+   *
+   * The click happens a fixed six seconds after the file is handed over, which is not
+   * always long enough: a 274-bar multitrack score is still rendering, so this waits out
+   * the tail of the *load* as well as the switch into edit mode. Since the indicator
+   * became honest the column has swung between 48ms and 22 seconds on the same file for
+   * that reason. Neither number is wrong; they are measuring different amounts of leftover
+   * load. Fixing it means waiting for the load to settle before starting the clock, which
+   * is worth doing when load time is the thing under investigation.
+   */
   const entered = Date.now();
   const edit = page.getByRole("button", { name: "EDIT", exact: true });
   if ((await edit.count()) > 0) {
@@ -123,6 +185,40 @@ async function measure(browser, label, open) {
     await page.waitForTimeout(150);
   }
   samples.sort((a, b) => a - b);
+
+  /**
+   * A burst: six frets typed as fast as a person types, then the wait for the score to
+   * catch up. This is what editing actually feels like, and it is a different thing from
+   * the number above.
+   *
+   * The per-keystroke measurement waits for each render before pressing again, so it can
+   * only ever see the cost of one engrave. Nobody types that way. If every keystroke buys
+   * its own full re-engrave, a burst of six costs six of them and the editor falls further
+   * behind the longer you type, which is the complaint.
+   *
+   * What is reported is the count of engraves, not the milliseconds. The wall clock here
+   * is worthless: the same six keystrokes on the same score measured 4.4s and 5.3s on
+   * consecutive runs, a spread wider than the effect being measured. The count is exact,
+   * and it is the property the coalescing queue in useAlphaTab actually claims.
+   */
+  const engravesBefore = await page.evaluate(
+    () => Number(document.querySelector("[data-engraves]")?.getAttribute("data-engraves") ?? -1),
+  );
+  await page.waitForTimeout(600);
+  const burstStarted = Date.now();
+  for (const digit of ["Digit7", "Digit5", "Digit3", "Digit2", "Digit7", "Digit9"]) {
+    await page.keyboard.press(digit);
+    // 40ms apart: brisk typing, and far inside one engrave on a large score.
+    await page.waitForTimeout(40);
+    await page.keyboard.press("ArrowRight");
+    await page.waitForTimeout(40);
+  }
+  await settled(page, 120_000);
+  const burst = Date.now() - burstStarted;
+  const engravesAfter = await page.evaluate(
+    () => Number(document.querySelector("[data-engraves]")?.getAttribute("data-engraves") ?? -1),
+  );
+
   await context.close();
 
   return {
@@ -132,6 +228,8 @@ async function measure(browser, label, open) {
     intoEditor,
     median: samples[Math.floor(samples.length / 2)],
     worst: samples.at(-1),
+    burst,
+    engraves: engravesBefore < 0 || engravesAfter < 0 ? null : engravesAfter - engravesBefore,
     errors,
   };
 }
@@ -187,11 +285,11 @@ async function main() {
     }
 
     console.log("");
-    console.log("SCORE".padEnd(30) + "BARS   BOOT    EDITOR  KEYSTROKE  WORST   VERDICT");
-    console.log("-".repeat(88));
+    console.log("SCORE".padEnd(30) + "BARS   BOOT    EDITOR  KEYSTROKE  WORST   BURST6   ENGRAVES  VERDICT");
+    console.log("-".repeat(98));
     for (const r of rows) {
-      const ok = r.median <= BUDGET_MS && r.errors.length === 0;
-      if (!ok) failures += 1;
+      const verdict = judge(r);
+      if (verdict) failures += 1;
       console.log(
         r.label.padEnd(30) +
           String(r.bars).padEnd(7) +
@@ -199,13 +297,15 @@ async function main() {
           `${r.intoEditor}ms`.padEnd(8) +
           `${r.median}ms`.padEnd(11) +
           `${r.worst}ms`.padEnd(8) +
-          (ok ? "ok" : `OVER BUDGET (${BUDGET_MS}ms)${r.errors.length ? ` — ${r.errors[0]}` : ""}`),
+          `${r.burst}ms`.padEnd(9) +
+          `${r.engraves ?? "?"}/${BURST_KEYSTROKES}`.padEnd(10) +
+          (verdict ?? "ok"),
       );
     }
 
     console.log("");
     console.log(
-      `${rows.length} scores: ${rows.length - failures} within ${BUDGET_MS}ms, ${failures} over`,
+      `${rows.length} scores: ${rows.length - failures} passing, ${failures} failing`,
     );
     await browser.close();
   } finally {

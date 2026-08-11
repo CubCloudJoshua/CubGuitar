@@ -859,7 +859,10 @@ export function App() {
                 : { flex: 1, minWidth: 0, overflowX: "auto", position: "relative" }
             }
           >
-            <div ref={c.hostRef} />
+            {/* The engrave count rides on the element the engraving goes into, so a
+                measurement of how many passes a burst of typing cost reads it off the
+                thing it is counting. `pnpm editperf`, ENGRAVES. */}
+            <div ref={c.hostRef} data-engraves={c.engraves} />
             {editing && !performing && <BarMarkings e={editor} barBoxes={c.barBoxes} />}
             {editing && !performing && <SongwritingOverlay e={editor} barBoxes={c.barBoxes} />}
             {showListening && listening.report && (

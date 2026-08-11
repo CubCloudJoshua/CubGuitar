@@ -70,6 +70,19 @@ export interface RampConfig {
 
 const DEFAULT_RAMP: RampConfig = { enabled: false, step: 0.05, max: 1 };
 
+/**
+ * The engrave cost, in milliseconds, above which a keystroke is worth coalescing.
+ *
+ * The same 100ms as `tools/edit-perf.mjs`, and for the same reason: under it a keystroke
+ * feels like typing, so delaying one to save an engrave trades something a user notices
+ * for something they do not. Over it the editor is already visibly behind, and a wait no
+ * longer than the engrave it skips is invisible next to the engrave.
+ */
+const COALESCE_ABOVE_MS = 100;
+
+/** Longest a keystroke is ever held back, however expensive engraving has become. */
+const COALESCE_CAP_MS = 300;
+
 const SOUND_FONT = "/soundfont/sonivox.sf3";
 /**
  * Players that have already asked for the soundfont.
@@ -115,6 +128,44 @@ export function useAlphaTab() {
 
   const [ready, setReady] = useState(false);
   const [rendering, setRendering] = useState(false);
+  /**
+   * The tex waiting to be engraved, whether a render is in flight, and a handle on the
+   * drain function for the render-finished handler to call.
+   *
+   * Refs rather than state on all three: the coalescing decision happens inside a
+   * callback and inside an event handler registered once at mount, both of which need
+   * the value as of *now* rather than as of the last React render, and neither should
+   * cause one. The handler cannot close over `drainRender` directly — it is registered
+   * in a mount effect and would capture the first one forever.
+   */
+  const pendingTex = useRef<string | null>(null);
+  const renderInFlight = useRef(false);
+  const drainRenderRef = useRef<(() => void) | null>(null);
+  /**
+   * How long a whole engrave took, when the current one began, and the timer waiting to
+   * start the next.
+   *
+   * A whole engrave, deliberately, and not the render phase alphaTab reports: `api.tex()`
+   * blocks the calling thread for most of the cost before it fires renderStarted at all —
+   * 856ms of blocked main thread ahead of an 895ms render phase, on a 274-bar score in one
+   * sample. (Not our serialization: STANDALONE.md §3 measured that at ~10ms.) Sizing the
+   * coalescing delay off the render phase alone therefore underestimated the cost it is
+   * protecting against by more than half. The clock starts when the document is handed
+   * over and stops when the pixels are up, because that is the interval a user waits.
+   */
+  const lastEngraveMs = useRef(0);
+  const engraveStarted = useRef(0);
+  const renderTimer = useRef<number | null>(null);
+  /**
+   * Engrave passes since mount.
+   *
+   * Reported to the DOM so the perf gate can count them. Coalescing is a claim about how
+   * many times a burst of typing lays the score out, and a wall-clock burst number cannot
+   * check it: on a large score the same six keystrokes measured 4.4s and 5.3s on
+   * consecutive runs, which is noise wide enough to hide the whole effect. The count is
+   * exact. See `tools/edit-perf.mjs`, ENGRAVES.
+   */
+  const [engraves, setEngraves] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [score, setScore] = useState<ScoreInfo | null>(null);
   const [tracks, setTracks] = useState<TrackState[]>([]);
@@ -182,13 +233,29 @@ export function useAlphaTab() {
 
     api.renderStarted.on(() => {
       setRendering(true);
+      setEngraves((n) => n + 1);
+      // Marks this pass busy even when nothing here started it. Zoom, the stage palette
+      // and a file load all render through alphaTab directly, and a queue that only knew
+      // about its own passes would hand the engraver a second document mid-layout. The
+      // diagnostic that found this showed four keystrokes in a row deciding the engraver
+      // was idle while a render was still half a second from finishing.
+      renderInFlight.current = true;
+      if (engraveStarted.current === 0) engraveStarted.current = performance.now();
       // The old geometry describes a layout that is being replaced. Keeping it
       // would leave overlays pinned to bars that have moved.
       setBarBoxes([]);
       setSystemBoxes([]);
     });
     api.postRenderFinished.on(() => {
+      // Provisional. The drain below turns it back on if there is more to draw, and React
+      // batches both into one commit, so a burst never flickers the indicator between
+      // passes — it stays on from the first keystroke until the last one is on screen.
       setRendering(false);
+      renderInFlight.current = false;
+      if (engraveStarted.current > 0) lastEngraveMs.current = performance.now() - engraveStarted.current;
+      engraveStarted.current = 0;
+      // Whatever the user typed while this was laying out gets drawn now, in one pass.
+      drainRenderRef.current?.();
       armSoundFont(api);
       const lookup = api.renderer.boundsLookup;
       if (!lookup) return;
@@ -258,11 +325,131 @@ export function useAlphaTab() {
     };
   }, []);
 
-  const loadTex = useCallback((tex: string) => {
-    apiRef.current?.tex(tex);
+  /**
+   * Starts the newest pending render, if the engraver is free.
+   *
+   * Called from `loadTex` and again when a render finishes, which is what makes this a
+   * coalescing queue of depth one rather than a debounce: the latest document always
+   * gets engraved, and every superseded one in between is dropped without ever being
+   * laid out.
+   */
+  const drainRender = useCallback(() => {
+    if (renderInFlight.current) {
+      // Comes back on its own from postRenderFinished; this is only the watchdog. The
+      // in-flight flag is set from renderStarted, which alphaTab fires for renders nothing
+      // here asked for, and a pass whose finish event never arrives would otherwise wedge
+      // the editor for good — no keystroke would ever be drawn again. Polling instead
+      // costs one no-op timer per engrave and cannot deadlock.
+      if (renderTimer.current === null && pendingTex.current !== null) {
+        renderTimer.current = window.setTimeout(() => {
+          renderTimer.current = null;
+          drainRenderRef.current?.();
+        }, COALESCE_CAP_MS);
+      }
+      return;
+    }
+    const next = pendingTex.current;
+    if (next === null) return;
+    pendingTex.current = null;
+    if (renderTimer.current !== null) {
+      window.clearTimeout(renderTimer.current);
+      renderTimer.current = null;
+    }
+    renderInFlight.current = true;
+    // Before the call, not inside renderStarted: `tex()` does most of its work on the
+    // caller's thread and only then fires renderStarted, so a clock started there misses
+    // the larger half.
+    engraveStarted.current = performance.now();
+    // Said here rather than left to renderStarted, for the same reason. The call blocks this
+    // thread and renderStarted does not fire until it returns, so an indicator driven by
+    // that event alone went dark for the whole time the page was frozen — the app looked
+    // idle at exactly the moment it was least responsive. Two things were reading that lie:
+    // a user deciding whether their keystroke had registered, and `settled()` in the perf
+    // tool, which called an engrave finished while its expensive half had not begun.
+    setRendering(true);
+    apiRef.current?.tex(next);
   }, []);
 
+  // Reassigned every React render so the mount-effect handler always calls the current
+  // one. It cannot close over `drainRender` itself; it would hold the first forever.
+  drainRenderRef.current = drainRender;
+
+  /**
+   * Hands the engraver a document, coalescing bursts.
+   *
+   * alphaTab re-parses and re-lays out the whole score on every call, and on a real song
+   * that is a second and a half or more (measured: `pnpm editperf`, and STANDALONE.md §3
+   * on why the floor is alphaTab's rather than ours). Issuing one call per keystroke
+   * therefore bought one full engrave per keystroke, and typing six frets on a 274-bar
+   * score cost 7.6 seconds — the editor falling further behind the longer you typed, which
+   * is the complaint this fixes.
+   *
+   * Coalescing does not make one engrave faster; nothing short of owning the engraver
+   * will. What it fixes is the pile-up: six frets now cost three engraves on the 274-bar
+   * score and one on the 166-bar score, against five and six without it, because every
+   * state the user typed *through* is superseded before it is drawn. A single keystroke is
+   * slower by the wait, on purpose — that is the trade, and it is only ever taken on a
+   * score already past the point of feeling immediate. The ENGRAVES column exists because
+   * the per-keystroke number cannot see any of this, and because the wall-clock burst
+   * number is too noisy on a large score to see it either.
+   */
+  const loadTex = useCallback(
+    (tex: string) => {
+      pendingTex.current = tex;
+      // On from the moment a keystroke is accepted, not from the moment engraving starts.
+      // The gap between the two is the coalescing wait, and an indicator that was dark
+      // through it told the user their keystroke had not registered — the one thing the
+      // wait must not be allowed to imply. It also made the perf tool call a keystroke
+      // finished during the wait, which is how a 173ms median came out of a score that
+      // takes a second and a half to engrave.
+      setRendering(true);
+      if (renderTimer.current !== null) window.clearTimeout(renderTimer.current);
+      /**
+       * How long to hold a keystroke back, decided by what engraving currently costs.
+       *
+       * Coalescing on "is a render in flight" is not enough on its own, and measuring
+       * showed why: `api.tex()` blocks the main thread, so keystrokes typed during an
+       * engrave are not delivered until it is over. They arrive one at a
+       * time *between* passes, never during one, and an in-flight check has nothing to
+       * merge. Six frets on a 274-bar score therefore still cost six engraves.
+       *
+       * So the wait is real, but it exists only where it is free. Under
+       * COALESCE_ABOVE_MS the editor already answers a keystroke faster than a person can
+       * notice and nothing is held back at all — the four-bar case engraves in about
+       * thirty milliseconds and types straight through. Over it the user is watching a
+       * spinner either way, and a fraction of a second of that spinner spent gathering the
+       * rest of the phrase is invisible next to the engraves it removes. One rule, no
+       * arbitrary threshold: the number that decides it is the number the perf gate fails on.
+       */
+      const cost = lastEngraveMs.current;
+      if (cost <= COALESCE_ABOVE_MS) {
+        renderTimer.current = null;
+        drainRender();
+        return;
+      }
+      // One engrave's worth of wait, capped. Not a fraction of one: a keystroke that lands
+      // inside the time the last engrave took would have been superseded before it was
+      // drawn anyway, so waiting exactly that long is the window in which coalescing is
+      // free. A quarter of it was tried first and left a 166-bar score merging one pair out
+      // of six, because the timer kept firing while the user was still typing.
+      renderTimer.current = window.setTimeout(() => {
+        renderTimer.current = null;
+        drainRender();
+      }, Math.min(COALESCE_CAP_MS, Math.round(cost)));
+    },
+    [drainRender],
+  );
+
   const loadBytes = useCallback((buffer: ArrayBuffer) => {
+    // Drops any queued tex. It belongs to the document being left, and draining it after
+    // this file finishes rendering would engrave the old score over the new one — the
+    // hazard a coalescing queue introduces and the reason the queue is cleared here
+    // rather than only filled in `loadTex`.
+    pendingTex.current = null;
+    if (renderTimer.current !== null) {
+      window.clearTimeout(renderTimer.current);
+      renderTimer.current = null;
+    }
     apiRef.current?.load(new Uint8Array(buffer));
   }, []);
 
@@ -459,6 +646,7 @@ export function useAlphaTab() {
     getScore,
     ready,
     rendering,
+    engraves,
     playing,
     score,
     tracks,

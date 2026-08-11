@@ -115,6 +115,31 @@ that will be quoted most often.
 >
 > What an engraver has to beat is therefore 478ms, and what it has to reach is 100ms.
 > The 20ms on four bars says the rest of the stack is not the problem.
+>
+> **Where the time actually goes, measured since.** `api.tex()` blocks the calling
+> thread for most of an engrave *before* it fires `renderStarted`: on Achilles, 856ms
+> blocked ahead of an 895ms render phase; on the second pass of a burst, 2.4 seconds
+> blocked ahead of a 365ms one. So roughly half to nine tenths of a keystroke is spent
+> somewhere the render-window levers in the table above cannot reach, which is the
+> likeliest explanation for why the best of them stalls at 478ms.
+>
+> That half is not our alphaTex serialization, measured above at ~10ms, and it is not
+> the layout, which is the part `renderStarted`/`postRenderFinished` bracket. What it
+> *is* has not been identified. The candidates worth an hour before Phase R starts:
+> alphaTab's own alphaTex reader, `Score.finish()`, and the player's MIDI regeneration,
+> which runs on every load and scales with the whole document. If it turns out to be
+> the MIDI, that is a much cheaper fix than an engraver — regenerate it on play rather
+> than on every keystroke — and it would change the sequencing in §8.
+>
+> Two consequences already banked, neither of them Phase R:
+>
+> - Bursts coalesce (`apps/web/src/useAlphaTab.ts`). Six frets cost 3 engraves on
+>   Achilles and 1 on Stairway, against 5 and 6 before, and the 274-bar burst went from
+>   7.9s to 3.9s. One keystroke is not faster; a phrase is.
+> - The "rendering…" indicator used to go dark during the blocked half, because it was
+>   driven by `renderStarted`. The app looked idle at the moment it was least
+>   responsive, and `pnpm editperf` believed it — reporting a 173ms median on a score
+>   that takes three seconds. Both fixed by saying "engraving" from the keystroke.
 
 The big one. Split it, because tablature and standard notation are different
 problems wearing the same hat.
