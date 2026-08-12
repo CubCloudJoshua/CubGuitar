@@ -12,6 +12,7 @@ import {
   createNote,
   createScore,
   duration,
+  DRUM_VOICE_NAMES,
   mergeTies,
   nextId,
   pitchAt,
@@ -271,6 +272,33 @@ function collect(score: alphaTab.model.Score, skipPercussion: boolean): Stats {
         for (const voice of bar.voices) {
           for (const beat of voice.beats) {
             for (const note of beat.notes) {
+              /**
+               * A percussion note compares by the drum it sounds, not by `realValue`.
+               *
+               * `note.percussionArticulation` is an index into the track's articulation
+               * list and `realValue` on a percussion staff is not a General MIDI drum
+               * number, so comparing either directly would compare an artefact of how
+               * each side happened to order its kit. `outputMidiNumber` is the drum, and
+               * it is the same thing the importer stores and the MIDI writer emits.
+               */
+              if (note.isPercussion) {
+                const articulation = track.percussionArticulations[note.percussionArticulation];
+                // The same fallback the importer uses, and for the same reason: a track
+                // with no articulation list of its own — every GP3 drum track — is on
+                // alphaTab's built-in kit, where the index *is* the drum number. Dropping
+                // those notes instead made this comparison asymmetric rather than lenient:
+                // the original side counted nothing for them while the round-tripped side,
+                // whose tex does declare a list, counted all of them, and Stairway read as
+                // 1,081 kick drums appearing out of nowhere with nothing missing.
+                const voice = articulation?.outputMidiNumber ?? note.percussionArticulation;
+                // A voice no General MIDI drum matches is left out of the comparison, the
+                // same way dead notes are: there is no drum to compare. alphaTab has no
+                // sound for it and the notation writer has no name for it, so counting it
+                // would only measure which side happened to invent a number. The importer
+                // reports these, and `pnpm midi` still grades whatever they play.
+                if (DRUM_VOICE_NAMES.has(voice)) pitches.push(voice);
+                continue;
+              }
               // Dead notes are unpitched; GP3 additionally encodes them at
               // open-string-1 (fret -1), so comparing their "pitch" measures
               // a format quirk rather than musical content. Their placement
@@ -438,11 +466,12 @@ async function roundTrip(trigger: () => void): Promise<RoundTripResult> {
 
   const source = api.score;
   if (!source) return { ok: false, error: "no score after load" };
-  // Percussion is excluded from the *round trip* comparison because the trip goes
-  // through alphaTex, which does not carry drum tracks — see toAlphaTex for the
-  // measurement behind that. The model does carry them, and `pnpm midi` is where
-  // that is graded, against alphaTab's own channel-10 notes.
-  const original = collect(source, true);
+  // Percussion is in the comparison. It used to be excluded because the trip goes through
+  // alphaTex and alphaTex carried no drum tracks; now that it does (see toAlphaTex and
+  // percussion.ts), including it is what makes this the gate on the drum-voice names — a
+  // name that sounds the wrong drum is pitch drift here, on every corpus score with a kit
+  // in it. `pnpm midi` still grades our channel-10 output against alphaTab's separately.
+  const original = collect(source, false);
   original.tracks = source.tracks.length;
 
   let tex: string;
@@ -461,7 +490,7 @@ async function roundTrip(trigger: () => void): Promise<RoundTripResult> {
   const after = api.score;
   if (!after) return { ok: false, error: "no score after reload", original, tex, unsupported };
 
-  const converted = collect(after, true);
+  const converted = collect(after, false);
   return {
     ok: true,
     original,

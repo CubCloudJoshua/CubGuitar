@@ -12,6 +12,7 @@
  */
 import * as alphaTab from "@coderline/alphatab";
 import {
+  DRUM_VOICE_NAMES,
   nextId,
   type Articulation,
   type Bar,
@@ -29,6 +30,15 @@ import {
 export interface ImportReport {
   /** Features present in the source that our model does not carry yet. */
   unsupported: string[];
+  /**
+   * Tracks the notation writer can actually write.
+   *
+   * Now every track: drum tracks used to be excluded because alphaTex carried no
+   * percussion, and a caller that stored a core for a drum-only file made EDIT available
+   * and then showed a blank guitar staff, because the serializer substitutes a default
+   * track for a score with nothing writable in it. That is fixed at the source — see
+   * percussion.ts — so the count no longer needs to lie about what is there.
+   */
   trackCount: number;
   barCount: number;
   noteCount: number;
@@ -314,12 +324,31 @@ export function fromAlphaTab(source: alphaTab.model.Score): { score: Score; repo
   // which is a UI gap rather than a model one.
   const tracks = source.tracks.map((t) => trackOf(t, ctx));
 
-  // Drum tracks are in the model and go out to MIDI on channel 10. What they do not
-  // yet do is render as notation, because alphaTex takes articulation indices rather
-  // than drum numbers — see toAlphaTex. Saying which half works is the point.
-  for (const drum of source.tracks.filter((t) => t.staves[0]?.isPercussion)) {
+  // Drum tracks are carried whole now: model, notation and MIDI. What is worth reporting
+  // is the one thing that is still lost — a hit whose articulation resolves to no drum at
+  // all. Every GP3 drum track is on alphaTab's built-in kit with no list of its own, where
+  // the articulation index is the drum number; an index that is not a General MIDI drum
+  // voice therefore names nothing, alphaTab has no sound for it either, and the notation
+  // writer has no name to write. Stairway has fourteen of them, all index 0, which is how
+  // this case was found: `pnpm corpus` reported fourteen notes lost through the round trip
+  // once percussion entered the comparison.
+  const namelessVoices = new Set<number>();
+  for (const track of tracks) {
+    if (track.instrument.kind !== "drums") continue;
+    for (const bar of track.bars) {
+      for (const voice of bar.voices) {
+        for (const beat of voice.beats) {
+          for (const note of beat.notes) {
+            if (!DRUM_VOICE_NAMES.has(Math.round(note.pitch))) namelessVoices.add(Math.round(note.pitch));
+          }
+        }
+      }
+    }
+  }
+  if (namelessVoices.size > 0) {
+    const list = [...namelessVoices].sort((a, b) => a - b).join(", ");
     ctx.unsupported.add(
-      `drum track "${drum.name || "Drums"}" (plays and exports to MIDI; drum notation is not editable yet)`,
+      `drum hits on voice ${list}, which no General MIDI drum matches (they play as written but are not notated)`,
     );
   }
   if (source.words || source.music) ctx.unsupported.add("lyrics and credits metadata");
@@ -349,7 +378,7 @@ export function fromAlphaTab(source: alphaTab.model.Score): { score: Score; repo
       // are carried by the model and written to MIDI but not rendered as notation
       // (see toAlphaTex), so counting them here made a drum-only file claim to be
       // editable and then open a blank staff.
-      trackCount: tracks.filter((t) => t.instrument.kind !== "drums").length,
+      trackCount: tracks.length,
       barCount: tracks[0]?.bars.length ?? 0,
       noteCount: ctx.noteCount,
     },

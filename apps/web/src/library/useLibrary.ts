@@ -140,10 +140,9 @@ export function useLibrary(c: AlphaTabController, editor: EditorController, narr
           // while percussion was dropped on import and silently stopped being so
           // the moment it was carried. The file still plays, and the notice
           // explains what was dropped.
-          // `trackCount` counts renderable tracks, not every track — see
-          // from-alphatab. Drum tracks are carried by the model but alphaTex does
-          // not write them, so a drum-only file has nothing to edit even though it
-          // now has a track.
+          // `trackCount` counts tracks the notation writer can write. That is every
+          // track now, drums included, so a drum-only file is editable like any other;
+          // the count only ever excluded percussion because alphaTex could not carry it.
           if (converted.report.trackCount > 0) core = JSON.stringify(converted.score);
           // Nothing editable, so the user will never press EDIT and never see the
           // notice that explains why. Say it now, in the player.

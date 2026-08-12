@@ -252,11 +252,14 @@ work. What is missing is presets and naming, not model support.
 
 ### 4.4 Notations that are not tablature
 
-- **Drum tab and percussion notation.** The real gap. Percussion is dropped on
-  import today and the corpus report says so on every file that has a drum track.
-  It needs a percussion instrument kind, a mapping from MIDI note to drum voice and
-  staff position, and a notation head per voice. This is the most-requested missing
-  feature implied by our own import reports, which name it three times.
+- **Drum tab and percussion notation.** ~~The real gap.~~ Done. Drum tracks come in
+  as General MIDI drum voices, engrave as notation, play, and export to MIDI on
+  channel 10; a drum-only file is editable like any other. The mapping from drum
+  number to voice name is `packages/core/src/percussion.ts`, measured row by row
+  against alphaTab's own parser rather than transcribed from a specification. What is
+  *not* here is drum tab — the numbers-on-lines layout — and per-voice notation heads
+  beyond what alphaTab's default kit draws; both belong to Phase R, where the heads
+  are ours to choose.
 - **Chord charts and Nashville numbers.** Chord symbols over bars, no staff. The
   model needs a chord entity, which it does not have — chord diagrams are in the
   unsupported list. Worth having for worship and session players, who read charts
@@ -275,14 +278,20 @@ work. What is missing is presets and naming, not model support.
 Several formats above are blocked on the same three gaps, and they are worth fixing
 before the importers rather than during them.
 
-1. **Percussion.** ~~No instrument kind, so drum tracks are dropped.~~ Half done.
-   Drum tracks are carried by the model and written to MIDI on channel 10, graded
-   against alphaTab's own channel-10 notes by `pnpm midi`. What remains is
-   *notation*: alphaTex takes an articulation index rather than a drum number, and
-   writing all 47 General MIDI voices under `\articulation defaults` gave five
-   sounding notes — voices 35 to 39 — because every index past the end of the
-   default list is silent. The fix is for the tex we generate to declare its own
-   articulation list. Until then a drum-only file stays play-only and says so.
+1. **Percussion.** ~~No instrument kind, so drum tracks are dropped.~~ ~~Half done.~~
+   Done. Model, notation and MIDI. The half that was missing was notation, and the
+   conclusion drawn from the earlier measurement was wrong in an instructive way: the
+   fix was not for our tex to declare its own articulation list. alphaTex takes the
+   articulation *by name*, `\articulation defaults` puts every name of alphaTab's kit
+   in scope, and the index that appears in the parsed model is assigned by alphaTab in
+   order of first use — which is exactly why a number written by hand landed on the
+   wrong voice and why five of 47 appeared to sound. `packages/core/src/percussion.ts`
+   holds the 51 measured rows, `packages/formats/src/percussion.test.ts` re-measures
+   them against the real parser so the table cannot drift from the renderer, and
+   percussion is now inside the round-trip pitch comparison `pnpm corpus` makes. One
+   thing is genuinely unwritable: a hit whose articulation matches no General MIDI
+   drum, which alphaTab has no sound for either. Those are reported per voice number
+   rather than approximated to a neighbouring drum.
 2. **Chords.** ~~No chord entity, so chord diagrams and chord symbols are
    dropped.~~ Done. `Beat.chord` carries the symbol as typed ("Am7", "C/G"),
    parsed on demand by `core/harmony`; it survives alphaTex (as `ch`), MusicXML

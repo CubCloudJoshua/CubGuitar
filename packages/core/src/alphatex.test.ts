@@ -70,7 +70,12 @@ describe("toAlphaTex", () => {
     expect(closing?.trimStart().startsWith("\\rc 2")).toBe(true);
   });
 
-  it("omits drum tracks instead of writing wrong notation", () => {
+  it("writes drum tracks, which it used to omit", () => {
+    // Percussion was left out while the serializer had no way to name a drum voice: a
+    // number on a percussion staff is an index into a list alphaTab builds from the names
+    // a file used, so writing General MIDI numbers rendered a full kit and played five
+    // sounds. It writes names now — see percussion.ts, and percussion.test.ts in
+    // packages/formats for the round trip through the real parser.
     const score = createScore("t");
     const drums: Track = {
       id: "d",
@@ -79,8 +84,9 @@ describe("toAlphaTex", () => {
       bars: [createBar()],
     };
     const tex = toAlphaTex({ ...score, tracks: [...score.tracks, drums] });
-    expect(tex).not.toContain("percussion");
-    expect(tex).not.toContain("Drums");
+    expect(tex).toContain("\\instrument percussion");
+    expect(tex).toContain('\\track "Drums"');
+    expect(tex).toContain("\\articulation defaults");
   });
 
   it("escapes double quotes in metadata", () => {

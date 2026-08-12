@@ -104,11 +104,13 @@ export async function run({ browser, baseUrl, recorder }) {
     glyphsBefore,
   );
 
-  // The other end of the same problem: a file with nothing editable in it at
-  // all. Percussion is not in the model yet, so a drum-only transcription
-  // converts to zero tracks — and the serializer substitutes a default guitar
-  // track for an empty score, so offering EDIT handed the user a blank staff
-  // where their music had been.
+  // A drum-only file. This used to be the "nothing editable" case: percussion was
+  // carried by the model but the notation serializer could not write it, so a drum-only
+  // score serialized to nothing and the writer substituted a default guitar track —
+  // offering EDIT would have handed the user a blank staff where their music had been.
+  // The serializer writes drum voices by name now (packages/core/src/percussion.ts), so
+  // this is an ordinary editable score and the check is that EDIT is offered rather than
+  // withheld.
   await page.setInputFiles('input[type="file"]', PERCUSSION_ONLY);
   await settle(4000);
   recorder.check(
@@ -117,18 +119,26 @@ export async function run({ browser, baseUrl, recorder }) {
       (await page.locator("header").innerText()).includes("Percussion Only"),
   );
   recorder.equal(
-    "editing is not offered for a file with nothing editable in it",
+    "editing is offered for a drum-only file",
     await page.getByRole("button", { name: "EDIT", exact: true }).count(),
-    0,
+    1,
+  );
+  await page.getByRole("button", { name: "EDIT", exact: true }).click();
+  await settle(3000);
+  // The real claim: the kit is on screen as notation, not a blank guitar staff standing
+  // in for it. A substituted default track is what this whole case exists to catch, and
+  // it would show as an empty staff with a tuning rather than a drum clef.
+  const drumStaff = await scoreText(page);
+  recorder.check(
+    "and the kit is engraved rather than replaced by a blank staff",
+    (await page.locator(".at-surface svg").count()) > 0 && !/Guitar/i.test(drumStaff),
+    drumStaff.slice(0, 120),
   );
   const notice = await page.locator("body").innerText();
   recorder.check(
-    "and the player says why, naming which half of percussion works",
-    // The wording changed with the model: drum tracks are carried and exported to
-    // MIDI now, and only the *notation* is not editable. A report that still said
-    // "percussion is not editable" would be understating what the file can do.
-    /nothing here CubScore can edit/.test(notice) && /drum notation is not editable/.test(notice),
-    (notice.match(/nothing here[^\n]*/) ?? ["no notice"])[0],
+    "no stale warning claims drum notation cannot be edited",
+    !/drum notation is not editable/.test(notice),
+    (notice.match(/drum[^\n]*/) ?? ["no drum notice"])[0],
   );
 
   // The fretboard reader can show a pitched staff, because fingering one is exactly

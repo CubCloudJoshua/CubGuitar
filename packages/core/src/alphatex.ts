@@ -7,6 +7,7 @@
  * render path.
  */
 import type { Articulation, Bar, Beat, Instrument, Score, Track } from "./score.js";
+import { drumVoiceName } from "./percussion.js";
 
 const NOTE_NAMES = ["C", "Db", "D", "Eb", "E", "F", "Gb", "G", "Ab", "A", "Bb", "B"] as const;
 
@@ -48,13 +49,28 @@ function tiedStrings(beat: Beat): Set<number> {
 }
 
 function noteToken(beat: Beat, instrument: Instrument, tiedFromPrev: Set<number>): string {
-  // A percussion staff takes drum voices, not pitches — alphaTex rejects a pitch
-  // name outright ("Cannot use pitched note value on percussion staff"). The voice
-  // number goes in parentheses even when there is only one of them, which is the
-  // one form of the four candidates tried that the parser accepts.
+  /**
+   * A percussion staff takes an articulation *name*, not a pitch and not a drum number.
+   *
+   * alphaTex rejects a pitch name outright ("Cannot use pitched note value on percussion
+   * staff"), and a bare number is read as an index into a list alphaTab builds from the
+   * names the file used — so writing our stored General MIDI numbers produced a file that
+   * rendered a full kit and played five sounds. `percussion.ts` holds the measured bridge
+   * from those numbers to names alphaTab resolves.
+   *
+   * A voice with no name is dropped rather than approximated: see `drumVoiceName`. A beat
+   * left with nothing is a rest, which keeps the bar's arithmetic intact — the alternative
+   * is a beat with no notes and no rest, which is not writable.
+   */
   if (instrument.kind === "drums") {
-    if (beat.notes.length === 0) return "r";
-    return `(${beat.notes.map((note) => String(Math.round(note.pitch))).join(" ")})`;
+    const voices = beat.notes
+      .map((note) => drumVoiceName(note.pitch))
+      .filter((name): name is string => name !== null);
+    if (voices.length === 0) return "r";
+    // Parentheses for one voice as well as several. A bare `"Kick (hit)".4` also parses,
+    // so this is a choice rather than a requirement: one form for both cases means the
+    // chord path is the only path, and the single-note case cannot drift away from it.
+    return `(${voices.map((name) => `"${name}"`).join(" ")})`;
   }
 
   const parts = beat.notes.map((note) => {
@@ -180,26 +196,25 @@ export function toAlphaTex(score: Score): string {
   if (score.artist) header.push(`\\artist "${score.artist.replace(/"/g, "'")}"`);
   header.push(".");
   /**
-   * Drum tracks are still omitted, and now for a measured reason rather than an
-   * assumed one.
+   * Drum tracks are written now. They were omitted for a measured reason, and the
+   * measurement turned out to be reading the wrong half of the problem.
    *
-   * The model carries percussion as General MIDI drum numbers, and a percussion
-   * staff does take a number in parentheses — `(38).4` parses. But that number is
-   * an *index into the staff's articulation list*, not a drum number. Writing all
-   * 47 GM voices under `\articulation defaults` and reading back what alphaTab's
-   * own MIDI generator sounded gave exactly five notes, voices 35 to 39: every
-   * index past the end of the default list is silent. So writing drum numbers here
-   * would produce a file that renders a full kit and plays five sounds, which is
-   * worse than a track the player is honest about not editing.
+   * What was established then still holds: a percussion staff does take a number in
+   * parentheses, `(38).4` parses, and that number is an *index* into a list — so writing
+   * our stored General MIDI numbers gave a file that rendered a full kit and played five
+   * sounds. The conclusion drawn from it was that the tex would have to declare its own
+   * articulation list. It does not. alphaTex takes the articulation *by name*, and
+   * `\articulation defaults` puts every name of alphaTab's kit in scope; the index in the
+   * parsed model is then assigned by alphaTab in order of first use, which is exactly why
+   * a number written by hand landed on the wrong voice.
    *
-   * What this needs is for the tex to declare its own articulation list, so the
-   * index we write is one we defined. That is the next step, and it starts from
-   * this measurement rather than from a guess. Percussion *is* carried through the
-   * model and out to MIDI on channel 10, where it is graded against alphaTab's own
-   * channel-10 notes by `pnpm midi`.
+   * `percussion.ts` is the bridge, measured one name at a time against the real parser.
+   * Percussion is now in the round-trip comparison `pnpm corpus` makes, so a wrong name
+   * shows up as pitch drift on every corpus score with drums in it — which is a stronger
+   * gate than the one that let the original mistake through.
    */
-  const tracks = score.tracks.filter((t) => t.instrument.kind !== "drums");
-  const body = tracks.length > 0 ? tracks.map(trackToTex).join("\n\n") : trackToTex(EMPTY_TRACK);
+  const body =
+    score.tracks.length > 0 ? score.tracks.map(trackToTex).join("\n\n") : trackToTex(EMPTY_TRACK);
   return `${header.join("\n")}\n${body}\n`;
 }
 

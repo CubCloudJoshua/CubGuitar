@@ -129,16 +129,20 @@ describe("bar-level structure", () => {
 });
 
 describe("what the report tells the user", () => {
-  it("carries a percussion track and says which half works", () => {
-    // Drum tracks used to be dropped outright. They are in the model now and go out
-    // to MIDI on channel 10; what they still cannot do is render as notation, and
-    // the report has to say which of the two it means rather than "dropped".
+  it("carries a percussion track with nothing left to report about it", () => {
+    // Drum tracks were dropped outright once, then carried by the model but unwritable
+    // by the notation serializer. Both are fixed, so a kit of ordinary voices is no
+    // longer a caveat at all — and this asserts the absence, because a stale warning is
+    // its own kind of lie.
     const { score, report } = convert(
       `${GUITAR}3.3.4 5.3.4 | 7.3.4 9.3.4\n\\track "Kit"\n\\staff{score} \\instrument percussion\n\\articulation defaults\n"Kick (hit)".4 r.2 r.4`,
     );
     expect(score.tracks.map((t) => t.instrument.kind)).toContain("drums");
     expect(score.tracks.map((t) => t.instrument.kind)).toContain("fretted");
-    expect(report.unsupported.some((u) => /drum track .*MIDI.*not editable/.test(u))).toBe(true);
+    expect(report.unsupported.some((u) => /drum/i.test(u))).toBe(false);
+    // And it counts toward what is editable, which is what decides whether the library
+    // stores an editable core at all.
+    expect(report.trackCount).toBe(2);
   });
 
   /**
@@ -171,18 +175,18 @@ describe("what the report tells the user", () => {
 });
 
 describe("degenerate input", () => {
-  it("carries a score whose only track is percussion, with nothing renderable in it", () => {
+  it("carries a score whose only track is percussion, and it is editable", () => {
     const { score, report } = convert(
       `\\track "Kit"\n\\instrument percussion\n\\articulation defaults\n"Kick (hit)".4 r.2 r.4`,
     );
-    // The drum track is carried now, so `trackCount` alone no longer tells the UI
-    // whether there is anything to edit — a caller has to ask whether any track is
-    // renderable, because alphaTex does not write drum notation. useLibrary does
-    // exactly that, and the e2e suite holds it: EDIT must stay unoffered here.
+    // A drum-only score is now an ordinary editable score: the notation writer carries
+    // percussion, so `trackCount` counts this track and the library stores a core for it.
+    // The previous behaviour — EDIT withheld, because alphaTex would have substituted a
+    // blank guitar staff for the whole file — is the thing that changed.
     expect(score.tracks).toHaveLength(1);
     expect(score.tracks[0]?.instrument.kind).toBe("drums");
-    expect(score.tracks.filter((t) => t.instrument.kind !== "drums")).toHaveLength(0);
-    expect(report.unsupported.join(" ")).toMatch(/drum notation is not editable/);
+    expect(report.trackCount).toBe(1);
+    expect(report.unsupported.some((u) => /drum/i.test(u))).toBe(false);
   });
 
   it("gives every entity a distinct id", () => {
