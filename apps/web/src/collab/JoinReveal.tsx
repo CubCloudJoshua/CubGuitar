@@ -14,7 +14,7 @@
  * underneath, so nothing about the sequence can delay or disturb the render, and
  * if it were skipped entirely the score would simply be visible.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { color, motion } from "@cubscore/design";
 import type { SystemBox } from "../useAlphaTab";
 
@@ -47,27 +47,47 @@ function prefersReducedMotion(): boolean {
  * and measured before there is any system geometry, and starting the timers
  * before that would spend the sequence on an empty surface.
  */
+/**
+ * Longest the sequence waits for the room's own layout before running on whatever is
+ * already on screen.
+ *
+ * There has to be a fallback. Waiting for a fresh layout is right when the join brings a
+ * different document, which is the normal case, but a guest whose score already matches
+ * the room's may get no re-layout at all — and a sequence that never starts is a sequence
+ * that never ends, leaving the carets suppressed for the rest of the session. Late bands
+ * are a blemish; missing collaborators are a broken feature.
+ */
+const FRESH_LAYOUT_WAIT_MS = 1500;
+
 export function useJoinReveal(joinCount: number, systemCount: number): RevealPhase {
   const [phase, setPhase] = useState<RevealPhase>("none");
   const handledRef = useRef(0);
   const armedRef = useRef(false);
   const timersRef = useRef<number[]>([]);
+  /**
+   * Whether the geometry on screen still belongs to the document we had before joining.
+   *
+   * Without this the sequence ran on the first layout with any systems in it, which is
+   * often the guest's *own* score: a join arms the sequence, the pre-join engraving is
+   * already measured, and the bands go up over a document the room is about to replace.
+   * One band covering everything, then the real score arriving underneath with no reveal
+   * at all — the signature moment spent on the wrong music. It showed up as a 1-in-3 e2e
+   * flake ("the join draws one band per staff system", 1 band) before it was understood as
+   * a real defect.
+   *
+   * Cleared when systemCount hits zero, which is a render starting: whatever is measured
+   * after that is the layout the join brought.
+   */
+  const staleLayoutRef = useRef(false);
+  const systemCountRef = useRef(systemCount);
+  systemCountRef.current = systemCount;
 
   useEffect(() => () => timersRef.current.forEach((id) => clearTimeout(id)), []);
 
-  useEffect(() => {
-    if (joinCount === 0 || joinCount === handledRef.current) return;
-    handledRef.current = joinCount;
-    // Someone who has asked for less motion gets the score and the carets at
-    // once. Not a shortened sequence — a sequence is the thing they turned off.
-    if (prefersReducedMotion()) return;
-    armedRef.current = true;
-    setPhase("armed");
-  }, [joinCount]);
-
-  useEffect(() => {
-    if (!armedRef.current || systemCount === 0) return;
+  const start = useCallback(() => {
+    if (!armedRef.current) return;
     armedRef.current = false;
+    staleLayoutRef.current = false;
     setPhase("systems");
     // Timers live in a ref rather than this effect's cleanup on purpose. A
     // re-layout mid-sequence — a window resize, a track appearing — changes
@@ -77,7 +97,30 @@ export function useJoinReveal(joinCount: number, systemCount: number): RevealPha
       window.setTimeout(() => setPhase("carets"), SYSTEMS_MS),
       window.setTimeout(() => setPhase("none"), SYSTEMS_MS + CARETS_MS),
     );
-  }, [systemCount]);
+  }, []);
+
+  useEffect(() => {
+    if (joinCount === 0 || joinCount === handledRef.current) return;
+    handledRef.current = joinCount;
+    // Someone who has asked for less motion gets the score and the carets at
+    // once. Not a shortened sequence — a sequence is the thing they turned off.
+    if (prefersReducedMotion()) return;
+    armedRef.current = true;
+    staleLayoutRef.current = systemCountRef.current > 0;
+    setPhase("armed");
+    timersRef.current.push(window.setTimeout(start, FRESH_LAYOUT_WAIT_MS));
+  }, [joinCount, start]);
+
+  useEffect(() => {
+    if (!armedRef.current) return;
+    // A render has begun, so the next geometry is the room's rather than ours.
+    if (systemCount === 0) {
+      staleLayoutRef.current = false;
+      return;
+    }
+    if (staleLayoutRef.current) return;
+    start();
+  }, [systemCount, start]);
 
   return phase;
 }

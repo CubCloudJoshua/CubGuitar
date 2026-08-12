@@ -78,6 +78,39 @@ export function AccountPanel({
         </Button>
       </div>
 
+      {/* The outcome of a confirmation link. Above the sign-in form and outside it,
+          because the link is usually opened in a browser that has no session: this is
+          the answer to something the user did in their mail client, not to anything in
+          the form below. */}
+      {auth.verifyResult && (
+        <div
+          data-verify-result={auth.verifyResult.ok ? "ok" : "failed"}
+          role="status"
+          style={{
+            border: `1px solid ${auth.verifyResult.ok ? color.accent : color.dangerText}`,
+            borderRadius: 8,
+            padding: "8px 10px",
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+          }}
+        >
+          <span
+            style={{
+              flex: 1,
+              fontFamily: font.mono,
+              fontSize: typeScale.sm,
+              color: auth.verifyResult.ok ? color.text : color.dangerText,
+            }}
+          >
+            {auth.verifyResult.message}
+          </span>
+          <Button size="sm" onClick={auth.dismissVerifyResult} style={{ color: color.textDim }}>
+            ×
+          </Button>
+        </div>
+      )}
+
       {auth.recoveryCode && (
         <div
           data-recovery-code={auth.recoveryCode}
@@ -217,7 +250,8 @@ export function AccountPanel({
           <span
             style={{ flexBasis: "100%", fontFamily: font.mono, fontSize: typeScale.xs, color: color.textDim }}
           >
-            Accounts back up your library and make share links revocable. No email verification yet.
+            Accounts back up your library and make share links revocable. A forgotten password is
+            reset with the recovery code, not by email.
           </span>
         </form>
       ) : (
@@ -238,6 +272,40 @@ export function AccountPanel({
                 itself. */}
             <span role="status">{syncState && <Label>{syncState}</Label>}</span>
           </div>
+
+          {/* Shown only when the address is unconfirmed AND this deployment can send the
+              mail. Without the second condition every user of a deployment with no
+              PUBLIC_URL would be asked forever to click a link that cannot be sent.
+              Deliberately not a blocker: the account works either way, because gating
+              function on a flag that depends on the operator's mail configuration would
+              let one missing environment variable lock out everybody. */}
+          {auth.user.verificationAvailable && auth.user.emailVerified === false && (
+            <div
+              data-email-unconfirmed=""
+              style={{
+                border: `1px solid ${color.hairline}`,
+                borderRadius: 8,
+                padding: "8px 10px",
+                display: "flex",
+                flexWrap: "wrap",
+                gap: 8,
+                alignItems: "center",
+              }}
+            >
+              <span style={{ flex: 1, fontFamily: font.mono, fontSize: typeScale.sm, color: color.textDim }}>
+                This address is not confirmed. Your account works, and your recovery code still
+                resets the password — confirming only proves the address is yours.
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                data-verify-resend=""
+                onClick={() => void auth.resendVerification()}
+              >
+                RESEND LINK
+              </Button>
+            </div>
+          )}
 
           <div>
             <div style={{ marginBottom: 6 }}>

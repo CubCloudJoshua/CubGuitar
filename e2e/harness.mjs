@@ -41,6 +41,17 @@ const IGNORED_CONSOLE = [
 export function createRecorder(suiteName) {
   const checks = [];
   const errors = [];
+  /**
+   * Console errors a suite has declared it is about to cause, active only while it is
+   * causing them.
+   *
+   * Some checks are about a request failing — a spent confirmation link must be refused —
+   * and the browser logs every non-2xx fetch as a console error, so proving the refusal
+   * happened also trips the error gate. The alternative was adding the status to the
+   * global IGNORED_CONSOLE list, which would have stopped every other suite from noticing
+   * a real one. Scoped instead: the allowance covers one action in one suite.
+   */
+  const allowed = [];
 
   return {
     suiteName,
@@ -55,6 +66,24 @@ export function createRecorder(suiteName) {
       checks.push({ name, pass, detail: pass ? undefined : `expected ${expected}, got ${actual}` });
       return pass;
     },
+    /**
+     * Runs an action that is expected to log a matching console error, and tolerates it.
+     *
+     * The allowance is dropped afterwards, with a short drain first: a console message
+     * for a request issued inside the action can be delivered just after it returns, and
+     * removing the pattern too eagerly would fail the suite intermittently — which is
+     * worse than not having the mechanism.
+     */
+    async expecting(pattern, action) {
+      allowed.push(pattern);
+      try {
+        return await action();
+      } finally {
+        await new Promise((r) => setTimeout(r, 300));
+        const index = allowed.indexOf(pattern);
+        if (index >= 0) allowed.splice(index, 1);
+      }
+    },
     /** Attaches error listeners to a page; tag distinguishes multi-page suites. */
     watch(page, tag = "page") {
       page.on("pageerror", (e) => errors.push(`${tag}: ${String(e).slice(0, 300)}`));
@@ -62,6 +91,7 @@ export function createRecorder(suiteName) {
         if (m.type() !== "error") return;
         const text = m.text();
         if (IGNORED_CONSOLE.some((re) => re.test(text))) return;
+        if (allowed.some((re) => re.test(text))) return;
         errors.push(`${tag}: ${text.slice(0, 300)}`);
       });
       return page;

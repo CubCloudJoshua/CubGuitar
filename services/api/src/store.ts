@@ -50,6 +50,20 @@ export interface User {
    */
   recoveryHash?: string;
   createdAt: number;
+  /**
+   * When the address proved it was reachable, and the live verification token if one is
+   * outstanding.
+   *
+   * All optional, and an account with none of them is not broken: verification is off
+   * unless the deployment sets PUBLIC_URL (see mail.ts), and every account created before
+   * this existed has an address nobody ever proved. So "unverified" means exactly that —
+   * unproven — and never "unusable". Gating what an account can do on a flag that depends
+   * on the operator's mail configuration would let one missing environment variable lock
+   * out every real user.
+   */
+  emailVerifiedAt?: number;
+  verifyHash?: string;
+  verifyExpiresAt?: number;
 }
 
 export interface UserStore {

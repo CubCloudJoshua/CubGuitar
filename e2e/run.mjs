@@ -27,7 +27,7 @@ const SYNC_PORT = Number(process.env.E2E_SYNC_PORT ?? 8798);
 const WEB_PORT = Number(process.env.E2E_WEB_PORT ?? 4399);
 const BASE_URL = `http://localhost:${WEB_PORT}/`;
 
-const SUITES = ["editor", "tracks", "palette", "responsive", "import-safety", "pitched-staff", "perform", "fretboard", "ascii-tab", "musicxml", "songwriting", "midi-import", "versions", "recording", "share-save", "collab", "accounts", "shared-device", "listening"];
+const SUITES = ["editor", "tracks", "palette", "responsive", "import-safety", "pitched-staff", "perform", "fretboard", "ascii-tab", "musicxml", "songwriting", "midi-import", "versions", "recording", "share-save", "collab", "accounts", "verify-email", "shared-device", "listening"];
 
 const children = [];
 let dataDir;
@@ -161,7 +161,18 @@ async function main() {
 
   start("pnpm", ["dev"], {
     cwd: path.join(ROOT, "services", "api"),
-    env: { ...process.env, PORT: String(API_PORT), CUBSCORE_DATA: dataDir },
+    env: {
+      ...process.env,
+      PORT: String(API_PORT),
+      CUBSCORE_DATA: dataDir,
+      // Switches email verification on, and states the origin links are built from.
+      // The API refuses to build one from the request's Host header (services/api/src/
+      // mail.ts), so without this the feature is off and the verify-email suite has
+      // nothing to drive. The default `file` transport spools each message under the
+      // data directory, which is how that suite reads its own confirmation link — no
+      // mail server, and the same code path a real single-machine deployment runs.
+      PUBLIC_URL: BASE_URL,
+    },
   });
   start("pnpm", ["dev"], {
     cwd: path.join(ROOT, "services", "sync"),
@@ -190,7 +201,7 @@ async function main() {
       const recorder = createRecorder(suite.name ?? suiteName);
       const started = Date.now();
       try {
-        await suite.run({ browser, baseUrl: BASE_URL, recorder });
+        await suite.run({ browser, baseUrl: BASE_URL, recorder, dataDir });
       } catch (e) {
         recorder.check(`suite completed without throwing`, false, String(e).slice(0, 300));
       }

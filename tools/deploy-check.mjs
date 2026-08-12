@@ -298,6 +298,52 @@ async function main() {
     );
   }
 
+  // ---------- 4b. email verification is off until an origin is stated ----------
+  // Both directions, for the same reason as the cookie. The switch is PUBLIC_URL, and the
+  // reason it is a switch rather than a fallback to the request's Host header is that Host
+  // is attacker-controlled: a link built from it can be aimed anywhere. A deployment that
+  // thinks it enabled verification and did not, or thinks it did not and has, is a
+  // deployment mailing the wrong thing or nothing.
+  const verifyPort = API_PORT + 20;
+  start(API, {
+    PORT: String(verifyPort),
+    HOST: BIND,
+    CUBSCORE_DATA: path.join(dataDir, "verify"),
+    PUBLIC_URL: `http://${BIND}:${verifyPort}`,
+  });
+  const verifyUp = await waitForPort(BIND, verifyPort);
+  check("a third instance starts with PUBLIC_URL set", verifyUp);
+  if (verifyUp) {
+    const reply = await register(BIND, verifyPort, "deploy-verify@example.com");
+    const payload = await reply.json().catch(() => ({}));
+    check(
+      "with PUBLIC_URL the API offers verification and marks a new address unconfirmed",
+      payload?.user?.verificationAvailable === true && payload.user.emailVerified === false,
+      JSON.stringify(payload?.user ?? null),
+    );
+    // The default transport spools to disk, so this also proves a message was actually
+    // produced and that it went where the operator is told to look for it.
+    const spool = path.join(dataDir, "verify", "mail");
+    const spooled = existsSync(spool) ? readdirSync(spool).filter((n) => n.endsWith(".eml")) : [];
+    const body = spooled.length > 0 ? readFileSync(path.join(spool, spooled[0]), "utf8") : "";
+    check(
+      "and spools a confirmation link to the data directory",
+      spooled.length === 1 && body.includes(`http://${BIND}:${verifyPort}/?verify=`),
+      spooled.length === 1 ? body.split("\n").find((l) => l.includes("verify=")) ?? "" : `${spooled.length} files`,
+    );
+  }
+  // The first instance has no PUBLIC_URL, so it must report the feature as unavailable
+  // rather than half-offering it.
+  const plainMe = await register(BIND, API_PORT, "deploy-noverify@example.com").then(
+    (r) => r.json(),
+    () => ({}),
+  );
+  check(
+    "without PUBLIC_URL the API reports verification unavailable",
+    plainMe?.user?.verificationAvailable === false,
+    JSON.stringify(plainMe?.user ?? null),
+  );
+
   // ---------- 5. the sync service ----------
   start(SYNC, { PORT: String(SYNC_PORT), HOST: BIND });
   const syncUp = await waitForPort(BIND, SYNC_PORT);

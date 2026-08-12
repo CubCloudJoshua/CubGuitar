@@ -28,8 +28,12 @@ Every variable either service reads. There are no others.
 | `CUBSCORE_DATA` | api | `services/api/data` | a path on the volume you back up |
 | `TRUST_PROXY` | api | off | `1`, if and only if a proxy you control is the only way in |
 | `COOKIE_SECURE` | api | off | `1`, and only when the proxy really terminates TLS |
+| `PUBLIC_URL` | api | unset | the origin users type, e.g. `https://score.example.com` — this is also the switch for email verification |
+| `MAIL_TRANSPORT` | api | `file` | `command` to hand messages to a real mailer |
+| `MAIL_COMMAND` | api | unset | e.g. `/usr/sbin/sendmail -t -i`, required by `MAIL_TRANSPORT=command` |
+| `MAIL_FROM` | api | `cubscore@<PUBLIC_URL host>` | an address your domain is allowed to send as |
 
-Four of these five are ways to ship something broken, so each one earns a paragraph.
+Four of the first five are ways to ship something broken, so each one earns a paragraph.
 
 **`HOST`.** The default is loopback because these services have no TLS: a default that
 listened on every interface would put session cookies in clear text the first time
@@ -51,6 +55,40 @@ the service is reachable directly, because then the header is whatever a client 
 `Secure` cookie on a plain-HTTP origin, so nobody can stay signed in and the symptom
 looks like broken login rather than a missing flag. `pnpm deploycheck` asserts both
 directions of this.
+
+## Email verification, and how to send mail without a mail provider
+
+Verification is **off until `PUBLIC_URL` is set**, and that is a security decision rather
+than a convenience one. A confirmation link needs an origin, and the only other place to
+get one is the request's `Host` header — which is whatever the client sent. Anyone able to
+reach the API could then ask it to mail a victim a link pointing at a host of the
+attacker's choosing, carrying a live token for the victim's account. There is nothing to
+validate a `Host` against, so the trusted origin has to be stated once, by you. No
+`PUBLIC_URL`, no link, no verification, and the client is told so and stays quiet about it
+rather than nagging every user to click something that cannot be sent.
+
+Two transports, and neither is a mail provider:
+
+- **`file`** (default) writes each message as an `.eml` under `$CUBSCORE_DATA/mail`, mode
+  0600. Not a stub that pretends to have sent something — on a single-machine deployment
+  with no mail configured, a spool an operator can read is the honest behaviour, and it is
+  the same path `pnpm e2e verify-email` drives. The files contain live tokens, which is why
+  they sit inside the data directory where its permissions and backups already apply.
+- **`command`** pipes an RFC 5322 message to `MAIL_COMMAND` on stdin — `sendmail -t`,
+  `msmtp -t`, `ssmtp`, or a provider's own CLI. Argv is split on whitespace and run
+  without a shell.
+
+There is deliberately no SMTP client and no provider SDK. That would mean a dependency, an
+API key in the deployment, and an outbound connection to a third party on every signup.
+`deliver` in `services/api/src/mail.ts` is the whole seam if one is ever wanted: one
+function, one case in one switch.
+
+**What verification does and does not do.** It proves an address is reachable. It does not
+gate anything: an unverified account works completely, and the panel says so in as many
+words. That is deliberate — gating function on a flag that depends on the operator's mail
+configuration would let one missing environment variable lock out every real user. A
+forgotten password is still reset with the recovery code, never by email, so a
+verification mail that never arrives cannot lock anyone out of anything.
 
 ## The container path
 
@@ -140,10 +178,16 @@ forward needs no migration step.
 
 Not deployment problems, but decide about them rather than discover them.
 
-- **No email verification.** An account is a credential, not a proof of address, so a
-  registration can claim someone else's email. Recovery codes are the only reset path
-  (`services/api/src/auth.ts`), which is deliberate — it means no reset email to forge —
-  but it also means a lost code is a lost account.
+- **A registration can still claim someone else's email.** Verification exists now, but it
+  is proof rather than enforcement: the first account to register an address holds it
+  whether or not it ever confirms, so squatting is possible and the real owner sees "an
+  account with this email already exists". Closing that means letting a *verified*
+  registration displace an unverified, empty holder — which makes account lifetime depend
+  on the mail configuration, and is a policy decision rather than a default. Not built on
+  purpose; needs a deliberate call.
+- **A lost recovery code is still a lost account.** Recovery codes remain the only reset
+  path (`services/api/src/auth.ts`), which is deliberate — no reset email to forge — and
+  confirming an address does not add a second one.
 - **Rate limits live in one process's memory.** Correct for a single API instance and
   wrong the moment there are two: each gets its own counters, so the effective limit
   multiplies. Run one, or move the buckets out.
