@@ -11,6 +11,7 @@ export * from "./arrange.js";
 export * from "./build.js";
 export * from "./alphatex.js";
 export * from "./percussion.js";
+export * from "./staff.js";
 export * from "./practice.js";
 export * from "./sync.js";
 export * from "./diff.js";

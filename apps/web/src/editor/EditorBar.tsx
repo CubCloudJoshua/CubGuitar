@@ -81,7 +81,7 @@ function useEditorKeys(e: EditorController, enabled: boolean) {
         // one. Same keys, because both are the fastest thing on the keyboard and no staff
         // is ever both; `typeDrum` returns false when the staff is not percussion, so the
         // fret path stays the default rather than being guarded twice.
-        if (!e.typeDrum(ev.key)) e.typeDigit(Number(ev.key));
+        if (!e.typeDrum(ev.key) && !e.typePitch(ev.key)) e.typeDigit(Number(ev.key));
         return;
       }
 
@@ -178,10 +178,11 @@ export function EditorBar({ e, enabled }: { e: EditorController; enabled: boolea
       <Label style={{ color: color.accent }}>EDIT</Label>
       <Label>
         bar {e.cursor.bar + 1} · beat {e.cursor.beat + 1} · {e.caretRowLabel}
-        {/* A drum staff has neither strings nor frets, so this read "string 4 · fret
-            undefined" over a hi-hat. The controller names the row, because it is the only
-            thing that knows what kind of staff the caret is on. */}
-        {e.canEnterDrums ? (note ? " · on" : " · off") : note ? ` · fret ${note.fret}` : " · empty"}
+        {/* Neither a drum nor a pitched note has a fret, so this read "string 4 · fret
+            undefined" over a hi-hat and "G2 · fret undefined" over a piano note. The fret
+            is reported when the note has one and the note's presence otherwise, which
+            covers all three kinds of staff without asking which one this is. */}
+        {note === undefined ? " · empty" : note.fret === undefined ? " · on" : ` · fret ${note.fret}`}
       </Label>
 
       <VDivider />

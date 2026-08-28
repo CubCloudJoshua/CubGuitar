@@ -2,6 +2,11 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   DRUM_KIT,
   drumSlotForKey,
+  rowDegree,
+  rowForDegree,
+  rowLabel,
+  rowPitch,
+  STAFF_ROWS,
   type Note,
   applyBatch,
   arrangeForFretted,
@@ -433,6 +438,44 @@ export function useEditor() {
     [beat, track, commit],
   );
 
+  /**
+   * Enters a scale degree on a staff with no strings: an imported piano, vocal or wind
+   * part, which was read-only here until now.
+   *
+   * The number row means the degree of the bar's key rather than a fret, so 1 is the tonic
+   * and 5 the dominant in whatever key the music is actually in — which is both what a
+   * musician already thinks in and the only reading of the digits that survives a key
+   * change. The pitch lands in the octave the caret is already in; the arrows are how you
+   * reach another one.
+   *
+   * Replaces whatever the caret's row held rather than appending, which is the same rule
+   * fret entry follows on a string: a row is one voice of the beat. `note.insert` cannot
+   * enforce it — it appends for a note with no string, and it is right to, because two
+   * notes on a pitched staff are a chord — so the replacement is explicit here, where the
+   * caret says which note was meant.
+   */
+  const typePitch = useCallback(
+    (key: string) => {
+      if (!beat || !track || track.instrument.kind !== "pitched") return false;
+      const degree = Number(key);
+      if (!Number.isInteger(degree) || degree < 1 || degree > 7) return false;
+      digitRef.current = null;
+      const row = rowForDegree(cursor.string, degree);
+      const pitch = rowPitch(row, keyAtCursor);
+      setCursor((c) => ({ ...c, string: row }));
+      const existing = beat.notes.find((n) => Math.round(n.pitch) === pitch);
+      const note: Note = { id: nextId("n"), pitch, articulations: [] };
+      commit(
+        existing
+          ? [op({ type: "note.remove", noteId: existing.id }), op({ type: "note.insert", beatId: beat.id, note })]
+          : [op({ type: "note.insert", beatId: beat.id, note })],
+        rowLabel(row, keyAtCursor),
+      );
+      return true;
+    },
+    [beat, track, cursor.string, keyAtCursor, commit],
+  );
+
   /** Enters a fret on the cursor's string, combining consecutive digits into 10-24. */
   const typeDigit = useCallback(
     (digit: number) => {
@@ -483,9 +526,13 @@ export function useEditor() {
       const slot = DRUM_KIT[cursor.string - 1];
       return slot ? beat.notes.find((n) => Math.round(n.pitch) === slot.midiNumber) : undefined;
     }
+    if (track?.instrument.kind === "pitched") {
+      const pitch = rowPitch(cursor.string, keyAtCursor);
+      return beat.notes.find((n) => Math.round(n.pitch) === pitch);
+    }
     if (track?.instrument.kind !== "fretted") return undefined;
     return beat.notes.find((n) => n.string === cursor.string);
-  }, [beat, track, cursor.string]);
+  }, [beat, track, cursor.string, keyAtCursor]);
 
   const deleteNote = useCallback(() => {
     if (!beat) return;
@@ -666,8 +713,21 @@ export function useEditor() {
             ? t.instrument.tuning.length
             : t?.instrument.kind === "drums"
               ? DRUM_KIT.length
-              : 6;
-        return { ...c, string: Math.max(1, Math.min(rows, c.string + delta)) };
+              : STAFF_ROWS;
+        /**
+         * Up is always higher, which means the index moves in opposite directions on
+         * different staves.
+         *
+         * String 1 is the *highest* string, so on a fretted staff up is a lower index.
+         * Row 1 is the *lowest* pitch on a pitched staff and the kick at the bottom of a
+         * drum staff, so up is a higher index there. Sharing the fretted direction — which
+         * is what happened when these staves inherited a caret written for a fretboard —
+         * made ArrowUp walk down the staff and stick at the bottom row, so most of a kit
+         * and every octave above the first was unreachable in the direction a writer
+         * would reach for it.
+         */
+        const step = t?.instrument.kind === "fretted" ? delta : -delta;
+        return { ...c, string: Math.max(1, Math.min(rows, c.string + step)) };
       });
     },
     [score],
@@ -740,7 +800,13 @@ export function useEditor() {
     caretRowLabel:
       track?.instrument.kind === "drums"
         ? (DRUM_KIT[cursor.string - 1]?.label ?? `voice ${cursor.string}`)
-        : `string ${cursor.string}`,
+        : track?.instrument.kind === "pitched"
+          ? rowLabel(cursor.string, keyAtCursor)
+          : `string ${cursor.string}`,
+    /** True on a staff with no strings, where the number row enters scale degrees. */
+    canEnterPitches: track?.instrument.kind === "pitched",
+    /** The degree the caret is on, 1 to 7, for the degree strip. */
+    caretDegree: rowDegree(cursor.string),
     /** True on a percussion staff, where the number row enters drum voices instead. */
     canEnterDrums: track?.instrument.kind === "drums",
     canUndo: past.length > 0,
@@ -748,6 +814,7 @@ export function useEditor() {
     opCount: logRef.current.length,
     typeDigit,
     typeDrum,
+    typePitch,
     deleteNote,
     setDuration,
     toggleDot,

@@ -57,13 +57,112 @@ export async function run({ browser, baseUrl, recorder }) {
     "the caret is on the piano staff",
     ((await page.locator(`${RAIL} button[aria-current="true"]`).getAttribute("aria-label")) ?? "").includes("Piano"),
   );
-  const beforePiano = await scoreText(page);
-  for (const key of ["Digit7", "Digit3", "Digit1"]) {
-    await page.keyboard.press(key);
-    await settle(500);
-  }
+  // A staff with no strings is no longer read-only: the number row enters scale degrees of
+  // the bar's key there. What it must never do is enter a *fret* — the old behaviour was a
+  // stray middle C appended per keystroke, because pitchAt had no tuning and answered the
+  // same pitch every time while the note carried a string the existing notes did not.
+  recorder.check(
+    "the degree strip is shown for a staff with no strings",
+    (await page.locator("[data-degree-strip]").count()) === 1,
+  );
+  const readoutPiano = await page.locator("text=/^bar \\d+ · beat/").first().innerText().catch(() => "");
+  recorder.check(
+    "the caret readout names a pitch rather than a string",
+    /[A-G]#?b?\d/.test(readoutPiano) && !/string/.test(readoutPiano),
+    readoutPiano,
+  );
+
+  // Degree 5 of the key, in the caret's own octave. The strip states which pitch that is,
+  // so this is asserted against the app's own claim rather than against a hard-coded note.
+  const degreePitch = async (degree) =>
+    page.locator(`[data-degree="${degree}"]`).getAttribute("data-degree-pitch");
+  const fifth = await degreePitch(5);
+  await page.keyboard.press("Digit5");
   await settle(1800);
-  recorder.equal("typing a fret on a stringless staff changes nothing", await scoreText(page), beforePiano);
+  recorder.equal(
+    "typing 5 puts the dominant on the staff",
+    await page.locator('[data-degree="5"]').getAttribute("data-degree-on"),
+    "true",
+  );
+  recorder.check(
+    "and the caret moved to that degree",
+    (await page.locator('[data-degree="5"]').getAttribute("data-degree-caret")) === "true",
+    `fifth is ${fifth}`,
+  );
+
+  // The octave is the caret's own, so the same digit writes a different pitch after the
+  // arrows have moved. Seven rows is exactly one octave.
+  const lowFifth = await degreePitch(5);
+  for (let i = 0; i < 7; i += 1) await page.keyboard.press("ArrowUp");
+  await settle(900);
+  const highFifth = await degreePitch(5);
+  recorder.check(
+    "moving up seven rows moves the degrees an octave",
+    highFifth !== lowFifth && highFifth?.slice(0, -1) === lowFifth?.slice(0, -1),
+    `${lowFifth} -> ${highFifth}`,
+  );
+  recorder.equal(
+    "the degree there is not sounding yet",
+    await page.locator('[data-degree="5"]').getAttribute("data-degree-on"),
+    "false",
+  );
+  await page.keyboard.press("Digit5");
+  await settle(1700);
+  recorder.check(
+    "and typing 5 writes the fifth of the caret's octave, not of the bottom one",
+    // Pinned to the pitch, not to the strip's relative view: entry also moves the caret,
+    // so a version that wrote the bottom octave would drag the strip down with it and
+    // every relative check would agree with itself.
+    (await page.locator('[data-degree="5"]').getAttribute("data-degree-on")) === "true" &&
+      (await degreePitch(5)) === highFifth,
+    `${await degreePitch(5)} expected ${highFifth}`,
+  );
+  for (let i = 0; i < 7; i += 1) await page.keyboard.press("ArrowDown");
+  await settle(900);
+
+  // A row is one voice of the beat, so the same row twice is a replacement, not a chord —
+  // while a *different* degree is a chord, which is the whole point of a pitched staff.
+  // Counted by removing one and checking nothing is left: a boolean "is it sounding" reads
+  // the same for one note and for two stacked at the same pitch, so it cannot see this.
+  await page.keyboard.press("Digit5");
+  await settle(1500);
+  await page.keyboard.press("Digit5");
+  await settle(1500);
+  await page.keyboard.press("Delete");
+  await settle(1500);
+  recorder.equal(
+    "typing the same degree twice leaves one note, not two stacked",
+    await page.locator('[data-degree="5"]').getAttribute("data-degree-on"),
+    "false",
+  );
+  await page.keyboard.press("Digit5");
+  await settle(1500);
+  await page.keyboard.press("Digit3");
+  await settle(1600);
+  const chord = await page.$$eval('[data-degree-on="true"]', (els) => els.map((el) => el.getAttribute("data-degree")));
+  recorder.check(
+    "a second degree builds a chord rather than replacing the first",
+    chord.includes("3") && chord.includes("5"),
+    JSON.stringify(chord),
+  );
+
+  // Delete had no way to find a note on this staff either, for the same reason.
+  await page.keyboard.press("Delete");
+  await settle(1500);
+  const afterDelete = await page.$$eval('[data-degree-on="true"]', (els) => els.map((el) => el.getAttribute("data-degree")));
+  recorder.check(
+    "Delete removes the note at the caret's degree",
+    !afterDelete.includes("3") && afterDelete.includes("5"),
+    JSON.stringify(afterDelete),
+  );
+
+  // Undo everything typed here, so the reload check below still measures an untouched
+  // piano staff — its whole purpose is to prove nothing was invented on it.
+  for (let i = 0; i < 10; i += 1) {
+    await page.keyboard.press("Control+z");
+    await settle(700);
+  }
+  await settle(1200);
 
   // And the guard is selective: the same keystroke on the guitar staff works.
   await page.locator(`${RAIL} button[aria-label^="Track 1"]`).click();
@@ -208,13 +307,21 @@ export async function run({ browser, baseUrl, recorder }) {
     JSON.stringify(await soundingNow()),
   );
 
-  // The caret runs down the kit here, not down six imaginary strings: the top four rows
-  // were unreachable while the bound was a guess.
+  // The caret runs the kit here, not six imaginary strings, and up means up: the crash is
+  // the top of a drum staff and the kick the bottom. Both were wrong at once — the range
+  // was a hard-coded six, so the top four voices did not exist, and the direction was
+  // inherited from a fretboard where string 1 is the highest, so ArrowUp walked downwards.
+  for (let i = 0; i < 12; i += 1) await page.keyboard.press("ArrowUp");
+  await settle(800);
+  recorder.check(
+    "ArrowUp reaches the top of the kit",
+    (await page.locator('[data-drum-slot="Crash"]').getAttribute("data-drum-caret")) === "true",
+  );
   for (let i = 0; i < 12; i += 1) await page.keyboard.press("ArrowDown");
   await settle(800);
   recorder.check(
-    "the arrows reach the bottom of the kit",
-    (await page.locator('[data-drum-slot="Crash"]').getAttribute("data-drum-caret")) === "true",
+    "and ArrowDown reaches the kick at the bottom",
+    (await page.locator('[data-drum-slot="Kick"]').getAttribute("data-drum-caret")) === "true",
   );
 
   // And it is a real edit: on a beat with nothing in it, a keystroke puts a drum there,
@@ -328,15 +435,9 @@ export async function run({ browser, baseUrl, recorder }) {
     `span ${span} across ${JSON.stringify(frets)}`,
   );
 
-  // Arranging the pitched staff for guitar. This is the payoff of the fingering
-  // solver as a *feature* rather than a capability: a staff that is read-only
-  // because it has no strings gets some, and because it is an op batch the whole
-  // thing is one undo step.
-  const pianoFrets = () =>
-    page.evaluate(() => {
-      const status = document.body.innerText.match(/fret (\d+)/g) ?? [];
-      return status.length;
-    });
+  // Arranging the pitched staff for guitar. This is the payoff of the fingering solver as
+  // a *feature* rather than a capability: a staff with no strings gets some, and because
+  // it is an op batch the whole thing is one undo step.
   const railLabel = async () =>
     (await page.locator(`${RAIL} button[aria-current="true"]`).getAttribute("aria-label")) ?? "";
   recorder.check("still on the piano staff before arranging", (await railLabel()).includes("Piano"));
@@ -374,13 +475,19 @@ export async function run({ browser, baseUrl, recorder }) {
   await settle(1500);
   await page.keyboard.press("Control+z");
   await settle(2500);
-  const afterUndo = await scoreText(page);
+  // The staff is pitched again, which used to be the same thing as read-only and is not
+  // any more: the number row goes back to meaning a scale degree rather than a fret. The
+  // readout is what says which, so it is what this asserts.
+  recorder.check(
+    "the degree strip is back, so the staff is pitched again",
+    (await page.locator("[data-degree-strip]").count()) === 1,
+  );
   await page.keyboard.press("Digit5");
   await settle(2000);
+  const undoneReadout = await page.locator("text=/^bar \\d+ · beat/").first().innerText().catch(() => "");
   recorder.check(
-    "undoing the arrangement makes the staff read-only again",
-    (await scoreText(page)) === afterUndo,
-    (await scoreText(page)).slice(0, 90),
+    "and a digit enters a pitch there, not a fret",
+    /[A-G]#?b?\d/.test(undoneReadout) && !/fret/.test(undoneReadout),
+    undoneReadout,
   );
-  void pianoFrets;
 }

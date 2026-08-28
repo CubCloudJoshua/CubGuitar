@@ -32,6 +32,7 @@ import { BarMarkings } from "./editor/BarMarkings";
 import { SongwritingOverlay } from "./editor/Songwriting";
 import { ChordDiagrams } from "./editor/ChordDiagrams";
 import { DrumKitStrip } from "./editor/DrumKitStrip";
+import { DegreeStrip } from "./editor/DegreeStrip";
 import { PerformBar, Setlist, TapZone, turnPage, usePerformShell } from "./perform/PerformMode";
 import { TransportPill } from "./components/TransportPill";
 import { ExportMenu } from "./components/ExportMenu";
@@ -732,6 +733,7 @@ export function App() {
       )}
       {editing && !performing && <ChordDiagrams e={editor} />}
       {editing && !performing && <DrumKitStrip e={editor} />}
+      {editing && !performing && <DegreeStrip e={editor} />}
       {/* Also shown in the player, for an import that converted to nothing
           editable: that user never presses EDIT, so gating this on the editor
           meant they were never told why their file is play-only. */}
