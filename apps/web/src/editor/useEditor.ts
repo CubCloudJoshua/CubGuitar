@@ -1,5 +1,8 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  DRUM_KIT,
+  drumSlotForKey,
+  type Note,
   applyBatch,
   arrangeForFretted,
   transposeScore,
@@ -396,6 +399,40 @@ export function useEditor() {
     [commit],
   );
 
+  /**
+   * Enters a drum voice on a percussion staff: the tenth of the kit the key names.
+   *
+   * Toggles rather than inserts. A drum cannot be struck twice at the same instant, so a
+   * second press of the same key means the writer changed their mind — and `note.insert`
+   * appends for a note with no string (which is every drum note), so inserting would have
+   * quietly stacked two kicks on one beat and played it twice as loud. One voice per beat
+   * is the model's own rule here, enforced where the intent is known rather than in the op.
+   *
+   * The caret follows the key, so Delete and the arrows act on the drum just entered.
+   */
+  const typeDrum = useCallback(
+    (key: string) => {
+      if (!beat || !track || track.instrument.kind !== "drums") return false;
+      const slot = drumSlotForKey(key);
+      if (!slot) return false;
+      digitRef.current = null;
+      setCursor((c) => ({ ...c, string: DRUM_KIT.indexOf(slot) + 1 }));
+      const existing = beat.notes.find((n) => Math.round(n.pitch) === slot.midiNumber);
+      if (existing) {
+        commit([op({ type: "note.remove", noteId: existing.id })], `${slot.label} off`);
+        return true;
+      }
+      const note: Note = {
+        id: nextId("n"),
+        pitch: slot.midiNumber,
+        articulations: [],
+      };
+      commit([op({ type: "note.insert", beatId: beat.id, note })], slot.label);
+      return true;
+    },
+    [beat, track, commit],
+  );
+
   /** Enters a fret on the cursor's string, combining consecutive digits into 10-24. */
   const typeDigit = useCallback(
     (digit: number) => {
@@ -427,11 +464,20 @@ export function useEditor() {
 
   const deleteNote = useCallback(() => {
     if (!beat) return;
-    const note = beat.notes.find((n) => n.string === cursor.string);
+    // A drum note has no string, so matching on one found nothing and Delete did nothing
+    // at all on a percussion staff. The caret's position there is a kit slot, and the note
+    // to remove is the one sounding that slot's drum.
+    const note =
+      track?.instrument.kind === "drums"
+        ? (() => {
+            const slot = DRUM_KIT[cursor.string - 1];
+            return slot ? beat.notes.find((n) => Math.round(n.pitch) === slot.midiNumber) : undefined;
+          })()
+        : beat.notes.find((n) => n.string === cursor.string);
     if (!note) return;
     digitRef.current = null;
     commit([op({ type: "note.remove", noteId: note.id })], "Delete note");
-  }, [beat, cursor.string, commit]);
+  }, [beat, track, cursor.string, commit]);
 
   const setDuration = useCallback(
     (denominator: number) => {
@@ -597,8 +643,15 @@ export function useEditor() {
       digitRef.current = null;
       setCursor((c) => {
         const t = score.tracks[c.track];
-        const strings = t?.instrument.kind === "fretted" ? t.instrument.tuning.length : 6;
-        return { ...c, string: Math.max(1, Math.min(strings, c.string + delta)) };
+        // On a percussion staff the caret runs down the kit, so the arrows step between
+        // drums; six was a guess that made the top four rows of a kit unreachable.
+        const rows =
+          t?.instrument.kind === "fretted"
+            ? t.instrument.tuning.length
+            : t?.instrument.kind === "drums"
+              ? DRUM_KIT.length
+              : 6;
+        return { ...c, string: Math.max(1, Math.min(rows, c.string + delta)) };
       });
     },
     [score],
@@ -650,12 +703,13 @@ export function useEditor() {
     cursorTick,
     beatDurationTicks,
     currentBeat: beat,
-    /** False on a staff with no strings, where fret entry does not apply. */
-    canEnterFrets: track?.instrument.kind === "fretted",
+    /** True on a percussion staff, where the number row enters drum voices instead. */
+    canEnterDrums: track?.instrument.kind === "drums",
     canUndo: past.length > 0,
     canRedo: future.length > 0,
     opCount: logRef.current.length,
     typeDigit,
+    typeDrum,
     deleteNote,
     setDuration,
     toggleDot,

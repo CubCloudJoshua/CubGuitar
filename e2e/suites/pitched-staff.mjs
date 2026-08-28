@@ -141,6 +141,100 @@ export async function run({ browser, baseUrl, recorder }) {
     (notice.match(/drum[^\n]*/) ?? ["no drum notice"])[0],
   );
 
+  // Drum entry. The number row means kit voices here rather than frets, and the strip is
+  // what makes that discoverable at all: a drum staff has no frets to make the digits
+  // self-evident the way a guitar staff does.
+  recorder.check("the kit strip is shown for a drum staff", (await page.locator("[data-drum-kit]").count()) === 1);
+  const slots = await page.locator("[data-drum-slot]").count();
+  recorder.equal("with one slot per kit voice", slots, 10);
+
+  const soundingNow = () =>
+    page.$$eval('[data-drum-on="true"]', (els) => els.map((el) => el.getAttribute("data-drum-slot")));
+
+  // The fixture's first beat is a kick, and the strip reads the beat rather than only the
+  // keyboard, so it says so before anything is typed.
+  recorder.check(
+    "the strip shows what the caret's beat already sounds",
+    (await soundingNow()).includes("Kick"),
+    JSON.stringify(await soundingNow()),
+  );
+
+  await page.keyboard.press("Digit2");
+  await settle(1600);
+  recorder.check("2 enters a snare", (await soundingNow()).includes("Snare"), JSON.stringify(await soundingNow()));
+  recorder.check(
+    "and the caret follows the key it was entered with",
+    (await page.locator('[data-drum-slot="Snare"]').getAttribute("data-drum-caret")) === "true",
+  );
+
+  await page.keyboard.press("Digit4");
+  await settle(1600);
+  const both = await soundingNow();
+  recorder.check(
+    "a second voice joins the beat rather than replacing it",
+    both.includes("Snare") && both.includes("HH closed"),
+    JSON.stringify(both),
+  );
+
+  // The rule a drum editor lives by: one voice per beat, and the same key takes it back.
+  // `note.insert` appends for a note with no string, so without the toggle this would be
+  // two snares on one beat, played twice as loud and impossible to see.
+  await page.keyboard.press("Digit2");
+  await settle(1600);
+  const afterToggle = await soundingNow();
+  recorder.check(
+    "pressing the same key again removes that voice",
+    !afterToggle.includes("Snare") && afterToggle.includes("HH closed"),
+    JSON.stringify(afterToggle),
+  );
+
+  // Delete matched on string, which a drum note does not have, so it did nothing at all.
+  await page.keyboard.press("Digit0");
+  await settle(1400);
+  recorder.check("0 is the tenth slot, not the zeroth", (await soundingNow()).includes("Crash"));
+  await page.keyboard.press("Delete");
+  await settle(1400);
+  recorder.check(
+    "Delete removes the voice at the caret",
+    !(await soundingNow()).includes("Crash"),
+    JSON.stringify(await soundingNow()),
+  );
+
+  // The caret runs down the kit here, not down six imaginary strings: the top four rows
+  // were unreachable while the bound was a guess.
+  for (let i = 0; i < 12; i += 1) await page.keyboard.press("ArrowDown");
+  await settle(800);
+  recorder.check(
+    "the arrows reach the bottom of the kit",
+    (await page.locator('[data-drum-slot="Crash"]').getAttribute("data-drum-caret")) === "true",
+  );
+
+  // And it is a real edit: on a beat with nothing in it, a keystroke puts a drum there,
+  // the engraving carries it, and one undo takes it back.
+  await page.keyboard.press("ArrowRight");
+  await settle(900);
+  // Measured against whatever this beat already holds rather than against an assumption
+  // about the fixture: the pattern is a real one, so no beat is empty, and an earlier
+  // version of this check asserted otherwise and failed for that reason alone.
+  const before = (await soundingNow()).sort();
+  await page.keyboard.press("Digit5");
+  await settle(1800);
+  const after = (await soundingNow()).sort();
+  recorder.check(
+    "a voice the beat lacked is added to it, leaving the rest alone",
+    after.includes("HH open") && before.every((v) => after.includes(v)) && after.length === before.length + 1,
+    `${JSON.stringify(before)} -> ${JSON.stringify(after)}`,
+  );
+  const engraved = await page.locator(".at-surface svg").count();
+  recorder.check("the drum staff is still engraved after editing", engraved > 0, `${engraved} svg`);
+  await page.keyboard.press("Control+z");
+  await settle(1600);
+  recorder.check(
+    "and one undo puts the beat back exactly as it was",
+    JSON.stringify((await soundingNow()).sort()) === JSON.stringify(before),
+    `${JSON.stringify(await soundingNow())} vs ${JSON.stringify(before)}`,
+  );
+
   // The fretboard reader can show a pitched staff, because fingering one is exactly
   // the problem @cubscore/core's `fingerSequence` solves: pitches in, playable
   // positions out. That is the user-visible payoff of extracting it — a piano part

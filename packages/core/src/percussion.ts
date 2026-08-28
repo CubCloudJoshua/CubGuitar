@@ -94,3 +94,50 @@ export const DRUM_VOICE_NAMES: ReadonlyMap<number, string> = new Map([
 export function drumVoiceName(midiNumber: number): string | null {
   return DRUM_VOICE_NAMES.get(Math.round(midiNumber)) ?? null;
 }
+
+/**
+ * One slot of the editing kit: a drum, its label, and the digit that enters it.
+ *
+ * Ten of them, because the number row has ten keys and because ten voices cover almost
+ * every rock, pop and folk drum part ever written. The full table above has 51, and a
+ * kit that offered all of them would need a mode, a search box, or two-key chords — none
+ * of which belong in the path between hearing a fill and writing it down. Anything
+ * outside these ten is still carried, played and engraved; it just arrives by import
+ * rather than by keystroke.
+ *
+ * The order is the order a drummer reads down a staff — kick at the bottom of the
+ * physical kit and the bottom of the notation, cymbals at the top — so the digits climb
+ * the same way the noteheads do.
+ */
+export interface DrumKitSlot {
+  /** General MIDI drum number, the same thing `Note.pitch` holds on a drums track. */
+  midiNumber: number;
+  /** Short label for the kit strip. Not alphaTab's articulation name, which is verbose. */
+  label: string;
+  /** The key that enters it: "1" through "9", then "0" for the tenth. */
+  key: string;
+}
+
+export const DRUM_KIT: readonly DrumKitSlot[] = [
+  { midiNumber: 35, label: "Kick", key: "1" },
+  { midiNumber: 38, label: "Snare", key: "2" },
+  { midiNumber: 37, label: "Rim", key: "3" },
+  { midiNumber: 42, label: "HH closed", key: "4" },
+  { midiNumber: 46, label: "HH open", key: "5" },
+  { midiNumber: 44, label: "HH pedal", key: "6" },
+  { midiNumber: 45, label: "Tom low", key: "7" },
+  { midiNumber: 47, label: "Tom mid", key: "8" },
+  { midiNumber: 48, label: "Tom high", key: "9" },
+  { midiNumber: 49, label: "Crash", key: "0" },
+];
+
+/**
+ * The kit slot a digit key enters, or null.
+ *
+ * "0" is the tenth slot rather than the zeroth, because the key sits at the end of the
+ * number row on every keyboard layout this will ever run on, and a strip labelled 1..9,0
+ * reads in the order the keys are arranged.
+ */
+export function drumSlotForKey(key: string): DrumKitSlot | null {
+  return DRUM_KIT.find((slot) => slot.key === key) ?? null;
+}

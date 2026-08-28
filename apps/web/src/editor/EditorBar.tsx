@@ -77,7 +77,11 @@ function useEditorKeys(e: EditorController, enabled: boolean) {
 
       if (/^[0-9]$/.test(ev.key)) {
         ev.preventDefault();
-        e.typeDigit(Number(ev.key));
+        // The number row means frets on a stringed staff and drum voices on a percussion
+        // one. Same keys, because both are the fastest thing on the keyboard and no staff
+        // is ever both; `typeDrum` returns false when the staff is not percussion, so the
+        // fret path stays the default rather than being guarded twice.
+        if (!e.typeDrum(ev.key)) e.typeDigit(Number(ev.key));
         return;
       }
 
