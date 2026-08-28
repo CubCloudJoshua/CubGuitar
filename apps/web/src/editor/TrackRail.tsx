@@ -15,9 +15,38 @@ import type { Track } from "@cubscore/core";
  * Instrument glyphs, one stroke weight, no fill. A bass reads as a guitar with
  * a longer neck and fewer pegs, which is exactly how it reads on a stage.
  */
-function InstrumentGlyph({ strings, active }: { strings: number; active: boolean }) {
+/**
+ * What the track is, in twenty pixels.
+ *
+ * `strings` is null for a track that has none. It used to be 6 for every such track,
+ * which drew a guitar beside a drum kit and labelled it "6 strings" — harmless while
+ * percussion was unwritable and read-only, wrong the moment a kit became something you
+ * type into.
+ */
+function InstrumentGlyph({ strings, active }: { strings: number | null; active: boolean }) {
   const stroke = active ? color.accent : color.textDim;
-  const bass = strings <= 4;
+  const bass = strings !== null && strings <= 4;
+  if (strings === null) {
+    return (
+      <svg
+        width="20"
+        height="20"
+        viewBox="0 0 20 20"
+        fill="none"
+        stroke={stroke}
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        style={{ transition: `stroke ${motion.base}` }}
+      >
+        {/* A kit read from the front: kick, snare, and a cymbal on its stand. */}
+        <circle cx="7" cy="14" r="4" />
+        <line x1="13" y1="14" x2="13" y2="6" />
+        <line x1="9.5" y1="6" x2="16.5" y2="6" />
+      </svg>
+    );
+  }
   return (
     <svg
       width="20"
@@ -59,8 +88,16 @@ function railButton(active: boolean): React.CSSProperties {
   };
 }
 
-function stringCount(track: Track): number {
-  return track.instrument.kind === "fretted" ? track.instrument.tuning.length : 6;
+/** A track's string count, or null for a staff that has none. */
+function stringCount(track: Track): number | null {
+  return track.instrument.kind === "fretted" ? track.instrument.tuning.length : null;
+}
+
+/** What the rail's tooltip says the track is. */
+function describe(track: Track): string {
+  const strings = stringCount(track);
+  if (strings !== null) return `${track.name} · ${strings} strings`;
+  return `${track.name} · ${track.instrument.kind === "drums" ? "drum kit" : "pitched staff"}`;
 }
 
 export function TrackRail({
@@ -101,7 +138,7 @@ export function TrackRail({
             onMouseUp={(ev) => ev.currentTarget.blur()}
             aria-current={active ? "true" : undefined}
             aria-label={`Track ${index + 1}: ${track.name}`}
-            title={`${track.name} · ${stringCount(track)} strings`}
+            title={describe(track)}
             style={railButton(active)}
           >
             <InstrumentGlyph strings={stringCount(track)} active={active} />

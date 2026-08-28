@@ -462,22 +462,38 @@ export function useEditor() {
     [beat, track, cursor.string, commit],
   );
 
+  /**
+   * The note the caret is on, whatever kind of staff it is.
+   *
+   * One helper because every caller wants the same thing and each one that answered it
+   * for itself answered it fretted-first. A drum note has no string, so matching on one
+   * found nothing: Delete did nothing at all on a percussion staff, and so did every
+   * articulation — an accented snare and a ghost note are ordinary drum writing, and both
+   * were silently ignored. On a percussion staff the caret's row is a kit slot and the
+   * note is the one sounding that slot's drum.
+   *
+   * Undefined on a staff with neither strings nor a kit — an imported piano or vocal part.
+   * That staff is read-only in this editor by the same decision that keeps `typeDigit` off
+   * it, and answering with an arbitrary note would make Delete remove something the caret
+   * was never on.
+   */
+  const noteAtCaret = useCallback((): Note | undefined => {
+    if (!beat) return undefined;
+    if (track?.instrument.kind === "drums") {
+      const slot = DRUM_KIT[cursor.string - 1];
+      return slot ? beat.notes.find((n) => Math.round(n.pitch) === slot.midiNumber) : undefined;
+    }
+    if (track?.instrument.kind !== "fretted") return undefined;
+    return beat.notes.find((n) => n.string === cursor.string);
+  }, [beat, track, cursor.string]);
+
   const deleteNote = useCallback(() => {
     if (!beat) return;
-    // A drum note has no string, so matching on one found nothing and Delete did nothing
-    // at all on a percussion staff. The caret's position there is a kit slot, and the note
-    // to remove is the one sounding that slot's drum.
-    const note =
-      track?.instrument.kind === "drums"
-        ? (() => {
-            const slot = DRUM_KIT[cursor.string - 1];
-            return slot ? beat.notes.find((n) => Math.round(n.pitch) === slot.midiNumber) : undefined;
-          })()
-        : beat.notes.find((n) => n.string === cursor.string);
+    const note = noteAtCaret();
     if (!note) return;
     digitRef.current = null;
     commit([op({ type: "note.remove", noteId: note.id })], "Delete note");
-  }, [beat, track, cursor.string, commit]);
+  }, [beat, noteAtCaret, commit]);
 
   const setDuration = useCallback(
     (denominator: number) => {
@@ -496,7 +512,7 @@ export function useEditor() {
   const toggleArticulation = useCallback(
     (articulation: Articulation) => {
       if (!beat) return;
-      const note = beat.notes.find((n) => n.string === cursor.string);
+      const note = noteAtCaret();
       if (!note) return;
       const has = note.articulations.includes(articulation);
       commit(
@@ -510,7 +526,7 @@ export function useEditor() {
         articulation,
       );
     },
-    [beat, cursor.string, commit],
+    [beat, noteAtCaret, commit],
   );
 
   const insertBeat = useCallback(() => {
@@ -703,6 +719,28 @@ export function useEditor() {
     cursorTick,
     beatDurationTicks,
     currentBeat: beat,
+    /**
+     * The note under the caret, for controls that act on one.
+     *
+     * Exported so nothing computes it a second time. Three callers had their own copy of
+     * "the note whose string matches the caret" — Delete, articulations, and the toolbar's
+     * enabled state — and every one of them was wrong on a percussion staff in the same
+     * way. The toolbar's copy is what made the bug visible: the articulation buttons stayed
+     * disabled forever on a drum track, which looks like a design decision rather than a
+     * staff the code cannot see notes on.
+     */
+    caretNote: noteAtCaret(),
+    /**
+     * What the caret's row is called on this staff.
+     *
+     * "string 4" over a hi-hat is nonsense, and the readout said exactly that — with
+     * "fret undefined" after it, because a drum note has no fret either. Named here
+     * rather than in the toolbar since this is the only place that knows the staff kind.
+     */
+    caretRowLabel:
+      track?.instrument.kind === "drums"
+        ? (DRUM_KIT[cursor.string - 1]?.label ?? `voice ${cursor.string}`)
+        : `string ${cursor.string}`,
     /** True on a percussion staff, where the number row enters drum voices instead. */
     canEnterDrums: track?.instrument.kind === "drums",
     canUndo: past.length > 0,

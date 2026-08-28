@@ -157,7 +157,7 @@ function MetaField({
 export function EditorBar({ e, enabled }: { e: EditorController; enabled: boolean }) {
   useEditorKeys(e, enabled);
 
-  const note = e.currentBeat?.notes.find((n) => n.string === e.cursor.string);
+  const note = e.caretNote;
   const canUndo = e.canUndo;
   const canRedo = e.canRedo;
 
@@ -177,8 +177,11 @@ export function EditorBar({ e, enabled }: { e: EditorController; enabled: boolea
     >
       <Label style={{ color: color.accent }}>EDIT</Label>
       <Label>
-        bar {e.cursor.bar + 1} · beat {e.cursor.beat + 1} · string {e.cursor.string}
-        {note ? ` · fret ${note.fret}` : " · empty"}
+        bar {e.cursor.bar + 1} · beat {e.cursor.beat + 1} · {e.caretRowLabel}
+        {/* A drum staff has neither strings nor frets, so this read "string 4 · fret
+            undefined" over a hi-hat. The controller names the row, because it is the only
+            thing that knows what kind of staff the caret is on. */}
+        {e.canEnterDrums ? (note ? " · on" : " · off") : note ? ` · fret ${note.fret}` : " · empty"}
       </Label>
 
       <VDivider />

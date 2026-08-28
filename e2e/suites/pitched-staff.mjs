@@ -145,6 +145,14 @@ export async function run({ browser, baseUrl, recorder }) {
   // what makes that discoverable at all: a drum staff has no frets to make the digits
   // self-evident the way a guitar staff does.
   recorder.check("the kit strip is shown for a drum staff", (await page.locator("[data-drum-kit]").count()) === 1);
+  // The readout used to say "string 4 · fret undefined" over a hi-hat, on a staff that has
+  // neither strings nor frets.
+  const readout = await page.locator("text=/^bar \\d+ · beat/").first().innerText().catch(() => "");
+  recorder.check(
+    "the caret readout names a drum rather than a string and a fret",
+    !/string/.test(readout) && !/fret/.test(readout),
+    readout,
+  );
   const slots = await page.locator("[data-drum-slot]").count();
   recorder.equal("with one slot per kit voice", slots, 10);
 
@@ -233,6 +241,45 @@ export async function run({ browser, baseUrl, recorder }) {
     "and one undo puts the beat back exactly as it was",
     JSON.stringify((await soundingNow()).sort()) === JSON.stringify(before),
     `${JSON.stringify(await soundingNow())} vs ${JSON.stringify(before)}`,
+  );
+
+  // Articulations matched the caret on its string too, so an accent on a drum staff did
+  // nothing at all — and an accented backbeat is about as ordinary as drum writing gets.
+  // HH open, which this fixture never uses, so the voice is certainly added rather than
+  // toggled away and the caret certainly lands on a note. Pressing 2 here removed the
+  // fixture's own snare instead, which left nothing at the caret and the buttons disabled.
+  await page.keyboard.press("Digit5");
+  await settle(1500);
+  recorder.check(
+    "the articulation controls are live on a drum note",
+    await page.getByRole("button", { name: "More articulations" }).isEnabled(),
+  );
+  // Accent lives behind MORE, not in the primary row.
+  const openMore = async () => {
+    await page.getByRole("button", { name: "More articulations" }).click();
+    await settle(400);
+  };
+  await openMore();
+  const accent = page.getByRole("button", { name: "Accent", exact: true });
+  recorder.equal("the accent is not set yet", await accent.getAttribute("aria-pressed"), "false");
+  await accent.click();
+  await settle(1800);
+  // Asserted on the model rather than the engraving: an accent is a glyph, so the SVG's
+  // text content is identical either way and an earlier version of this check compared
+  // exactly that and could never fail. `aria-pressed` is read back off the note.
+  await openMore();
+  recorder.equal(
+    "the accent is on the drum note",
+    await page.getByRole("button", { name: "Accent", exact: true }).getAttribute("aria-pressed"),
+    "true",
+  );
+  await page.getByRole("button", { name: "Accent", exact: true }).click();
+  await settle(1500);
+  await openMore();
+  recorder.equal(
+    "and clicking again takes it off",
+    await page.getByRole("button", { name: "Accent", exact: true }).getAttribute("aria-pressed"),
+    "false",
   );
 
   // The fretboard reader can show a pitched staff, because fingering one is exactly
